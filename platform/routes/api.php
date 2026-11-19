@@ -31,6 +31,9 @@ Route::prefix('install')->middleware(['not-installed', 'throttle:60,1'])->group(
     Route::post('/run', [InstallController::class, 'run']);
 });
 
+// Agents calling in with their own key: no browser session, no cookies. One tiny endpoint, rate limited.
+Route::middleware(['installed', 'throttle:120,1'])->get('/agent/ping', [\App\Http\Controllers\AgentController::class, 'ping']);
+
 // Everything else needs a finished installation and uses the cookie session ('web' group = session + CSRF).
 Route::middleware(['web', 'installed'])->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:30,1');
@@ -88,6 +91,8 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
 
             // Providers and usage: Admins monitor (read-only); only Super Admin changes anything (group below).
+            Route::get('/agents', [\App\Http\Controllers\AgentController::class, 'index']);
+            Route::get('/agents/{id}/checks', [\App\Http\Controllers\AgentController::class, 'checks'])->whereNumber('id');
             Route::get('/providers', [ProviderController::class, 'index']);
             Route::get('/prices', [PriceController::class, 'index']);
             Route::get('/usage/summary', [UsageController::class, 'summary']);
@@ -111,6 +116,15 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/settings/smtp-test', [SettingsController::class, 'smtpTest'])->middleware('throttle:10,1');
             Route::post('/settings/branding', [BrandingController::class, 'upload']);
             Route::delete('/settings/branding/{kind}', [BrandingController::class, 'destroy']);
+            Route::post('/agents', [\App\Http\Controllers\AgentController::class, 'store']);
+            Route::patch('/agents/{id}', [\App\Http\Controllers\AgentController::class, 'update'])->whereNumber('id');
+            Route::delete('/agents/{id}', [\App\Http\Controllers\AgentController::class, 'destroy'])->whereNumber('id');
+            Route::post('/agents/{id}/test', [\App\Http\Controllers\AgentController::class, 'test'])->whereNumber('id')->middleware('throttle:20,1');
+            Route::post('/agents/{id}/rotate', [\App\Http\Controllers\AgentController::class, 'rotate'])->whereNumber('id');
+            Route::post('/agents/{id}/rotate/activate', [\App\Http\Controllers\AgentController::class, 'activate'])->whereNumber('id')->middleware('throttle:20,1');
+            Route::delete('/agents/{id}/rotate', [\App\Http\Controllers\AgentController::class, 'cancelRotation'])->whereNumber('id');
+            Route::post('/agents/{id}/revoke', [\App\Http\Controllers\AgentController::class, 'revoke'])->whereNumber('id');
+            Route::post('/agents/{id}/inbound-key', [\App\Http\Controllers\AgentController::class, 'inboundKey'])->whereNumber('id');
             Route::post('/providers', [ProviderController::class, 'store']);
             Route::post('/providers/reorder', [ProviderController::class, 'reorder']);
             Route::patch('/providers/{provider}', [ProviderController::class, 'update']);

@@ -53,6 +53,56 @@ class HermesClient
     }
 
     /**
+     * Free connection check against a Hermes profile address: GET /v1/models needs the access key but spends no tokens,
+     * so it tells "unreachable" from "key rejected" from "profile not found".
+     *
+     * @return array{ok: bool, category: string, status: int|null, latency_ms: int|null}
+     *   category: ok | unauthorized | profile_missing | rate_limited | unavailable | timeout | bad_response
+     */
+    public function probe(string $url, ?string $key, ?string $profile = null): array
+    {
+        $t0 = hrtime(true);
+        $ms = fn () => (int) ((hrtime(true) - $t0) / 1e6);
+        try {
+            $request = Http::timeout(8)->connectTimeout(4)->withoutRedirecting()->acceptJson();
+            if ($key) {
+                $request = $request->withToken($key);
+            }
+            $response = $request->get(rtrim($url, '/').'/v1/models');
+        } catch (ConnectionException $e) {
+            // The raw message can contain the address, so only a category leaves this method.
+            $text = strtolower($e->getMessage());
+
+            return ['ok' => false, 'category' => str_contains($text, 'timed out') || str_contains($text, 'timeout') ? 'timeout' : 'unavailable', 'status' => null, 'latency_ms' => $ms()];
+        } catch (\Throwable) {
+            return ['ok' => false, 'category' => 'unavailable', 'status' => null, 'latency_ms' => $ms()];
+        }
+
+        $status = $response->status();
+        $out = fn (bool $ok, string $category) => ['ok' => $ok, 'category' => $category, 'status' => $status, 'latency_ms' => $ms()];
+
+        return match (true) {
+            in_array($status, [401, 403], true) => $out(false, 'unauthorized'),
+            $status === 429 => $out(false, 'rate_limited'),
+            $status === 404 => $out(false, 'profile_missing'),
+            $status !== 200 => $out(false, 'unavailable'),
+            default => $this->checkModels($response->json(), $profile, $out),
+        };
+    }
+
+    private function checkModels(mixed $body, ?string $profile, \Closure $out): array
+    {
+        if (! is_array($body) || ! isset($body['data']) || ! is_array($body['data'])) {
+            return $out(false, 'bad_response');
+        }
+        if ($profile && ! in_array($profile, array_column($body['data'], 'id'), true)) {
+            return $out(false, 'profile_missing');
+        }
+
+        return $out(true, 'ok');
+    }
+
+    /**
      * Send a conversation and wait for the full answer (non-streaming).
      *
      * Contract observed against a live Hermes gateway: success is a standard chat.completion with real `usage`.
@@ -65,14 +115,22 @@ class HermesClient
      *
      * @throws ProviderException
      */
-    public function chat(array $messages, ?\App\Models\ProviderConnection $connection = null): array
+    public function chat(array $messages, ?\App\Models\ProviderConnection $connection = null, ?array $target = null): array
     {
-        if (! $this->configured()) {
+        // An explicit target (agent test) wins; else the default agent; with no agents at all, the old .env settings.
+        $agents = app(AgentService::class);
+        $target ??= $agents->chatTarget();
+        if ($target === null && $agents->any()) {
+            throw new ProviderException('unavailable', retryable: true); // agents exist but none can be used: do not fall back to old settings
+        }
+        if ($target === null && ! $this->configured()) {
             throw new ProviderException('unavailable', retryable: true);
         }
 
-        $key = ($connection?->credentials ?: null) ?? config('services.hermes.key');
-        $url = rtrim((string) config('services.hermes.url'), '/').'/v1/chat/completions';
+        // An agent's own key always wins; a connection's saved key only applies in the old single-server setup.
+        $key = $target['key'] ?? (($connection?->credentials ?: null) ?? config('services.hermes.key'));
+        $url = rtrim($target['url'] ?? (string) config('services.hermes.url'), '/').'/v1/chat/completions';
+        $model = $target['model'] ?? config('services.hermes.model');
 
         try {
             $request = Http::timeout((int) config('services.hermes.timeout'))->connectTimeout(5)->withoutRedirecting()->acceptJson();
@@ -80,7 +138,7 @@ class HermesClient
                 $request = $request->withToken($key);
             }
             $response = $request->post($url, [
-                'model' => config('services.hermes.model'),
+                'model' => $model,
                 'messages' => $messages,
                 'stream' => false,
             ]);

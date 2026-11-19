@@ -66,6 +66,10 @@ class ChatService
             'chat', $estimate, $c->id,
         );
 
+        if ($agentId = app(AgentService::class)->chatTarget()['agent_id'] ?? null) {
+            $out['usage']->update(['agent_id' => $agentId]); // which agent served the request
+        }
+
         $reply = Message::create(['conversation_id' => $c->id, 'role' => 'assistant', 'content' => $out['result']['content'], 'request_id' => $requestId]);
         $c->update(['last_message_at' => now()]);
         $this->allowance->notifyThresholds($user, BusinessDay::today());

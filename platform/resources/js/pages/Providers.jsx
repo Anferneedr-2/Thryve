@@ -7,6 +7,7 @@ import { Button } from '../components/ui/Button';
 import { SelectField, TextField } from '../components/ui/Form';
 import { Alert, EmptyState, ErrorState, Pill, Skeleton, useToast } from '../components/ui/Feedback';
 import { ConfirmDialog, Dialog, Menu } from '../components/ui/Overlay';
+import AgentsPanel from './AgentsPanel';
 
 const STATUS = {
     available: ['success', 'Working'], unknown: ['muted', 'Not checked'], unavailable: ['warning', 'Not responding'],
@@ -234,9 +235,9 @@ export default function Providers() {
     return (
         <>
             <h1 className="text-4xl">AI providers</h1>
-            {!canManage && <Alert tone="info" title="View only">Only a Super Admin can change connections or prices.</Alert>}
-            <Tabs tabs={[{ id: 'connections', label: 'Connections' }, { id: 'usage', label: 'Usage' }, { id: 'prices', label: 'Prices' }]} value={tab} onChange={setTab} />
-            {tab === 'connections' ? <Connections canManage={canManage} /> : tab === 'usage' ? <Usage /> : <Prices canManage={canManage} />}
+            {!canManage && <Alert tone="info" title="View only">Only a Super Admin can change connections, agents or prices.</Alert>}
+            <Tabs tabs={[{ id: 'connections', label: 'Connections' }, { id: 'agents', label: 'Agents' }, { id: 'usage', label: 'Usage' }, { id: 'prices', label: 'Prices' }]} value={tab} onChange={setTab} />
+            {tab === 'connections' ? <Connections canManage={canManage} /> : tab === 'agents' ? <AgentsPanel canManage={canManage} /> : tab === 'usage' ? <Usage /> : <Prices canManage={canManage} />}
         </>
     );
 }
