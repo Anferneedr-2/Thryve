@@ -251,6 +251,7 @@ class SystemSettingsTest extends TestCase
 
     public function test_health_reports_each_dependency_with_a_safe_status(): void
     {
+        config(['services.hermes.url' => null]); // the developer's own .env may point at a real Hermes
         $c = $this->superCookie();
 
         $r = $this->device($c)->getJson('/api/system/health')->assertOk();

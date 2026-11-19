@@ -40,6 +40,8 @@ return [
     'hermes' => [
         'url' => env('HERMES_URL'),
         'key' => env('HERMES_API_KEY'),
+        'model' => env('HERMES_MODEL', 'thryve-bot'), // the profile name Hermes serves, sent as "model" in each request
+        'timeout' => (int) env('HERMES_TIMEOUT', 60), // seconds; Hermes retries a rate-limited provider for 10 minutes, so we never wait that long
     ],
 
 ];

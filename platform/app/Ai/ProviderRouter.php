@@ -117,7 +117,7 @@ class ProviderRouter
         $status = match ($e->category) {
             'unauthorized' => 'reauth_required',
             'quota_exhausted' => 'quota_exhausted',
-            'bad_request' => $c->status, // the request was at fault, not the connection
+            'bad_request', 'bad_response' => $c->status, // the request or one odd reply, not the connection itself
             default => 'unavailable',
         };
         $changed = $status !== $c->status;
