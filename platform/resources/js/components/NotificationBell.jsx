@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api, send } from '../lib/api';
 import { useAttendanceStatus } from '../lib/heartbeat';
 import { formatDateTime } from '../lib/util';
@@ -23,6 +24,7 @@ export default function NotificationBell() {
     const [error, setError] = useState(null);
     const [pos, setPos] = useState({ top: 0, right: 0 });
     const wrap = useRef(null);
+    const pop = useRef(null);
     const trigger = useRef(null);
 
     useEffect(() => setUnread(fromServer), [fromServer]);
@@ -35,7 +37,9 @@ export default function NotificationBell() {
     const toggle = () => {
         if (!open) {
             const r = trigger.current.getBoundingClientRect();
-            setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+            // Line the list up under the bell, but never let it run off the left edge on a phone.
+            const width = Math.min(360, window.innerWidth - 16);
+            setPos({ top: r.bottom + 6, right: Math.min(Math.max(8, window.innerWidth - r.right), Math.max(8, window.innerWidth - width - 8)) });
             load();
         }
         setOpen(!open);
@@ -43,7 +47,7 @@ export default function NotificationBell() {
 
     useEffect(() => {
         if (!open) return;
-        const away = (e) => !wrap.current.contains(e.target) && setOpen(false);
+        const away = (e) => !wrap.current.contains(e.target) && !pop.current?.contains(e.target) && setOpen(false);
         const key = (e) => { if (e.key === 'Escape') { setOpen(false); trigger.current.focus(); } };
         const close = () => setOpen(false);
         document.addEventListener('mousedown', away);
@@ -73,8 +77,9 @@ export default function NotificationBell() {
                     </span>
                 )}
             </button>
-            {open && (
-                <div role="dialog" aria-label="Notifications" className="sl-menu" style={{ position: 'fixed', top: pos.top, right: pos.right, zIndex: 40, width: 'min(360px, calc(100vw - 16px))', maxHeight: 'min(480px, 70vh)', overflowY: 'auto', padding: 0 }}>
+            {open && createPortal(
+                // Rendered on the page itself: inside the blurred navigation bar, "fixed" would be measured from the bar, not the screen.
+                <div ref={pop} role="dialog" aria-label="Notifications" className="sl-menu" style={{ position: 'fixed', top: pos.top, right: pos.right, zIndex: 40, width: 'min(360px, calc(100vw - 16px))', maxHeight: 'min(480px, 70vh)', overflowY: 'auto', padding: 0 }}>
                     <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--slate-200)' }}>
                         <strong className="font-display text-base" style={{ color: 'var(--sl-heading)' }}>Notifications</strong>
                         <Button variant="ghost" size="sm" className="ml-auto" disabled={unread === 0} onClick={markAll}>Mark all as read</Button>
@@ -97,7 +102,8 @@ export default function NotificationBell() {
                             ))}
                         </ul>
                     )}
-                </div>
+                </div>,
+                document.body,
             )}
         </div>
     );

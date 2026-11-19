@@ -61,8 +61,11 @@ export default function Settings() {
             toast('Settings saved');
         } catch (e2) {
             const d = e2.details ?? {};
-            if (Object.keys(d).length) setErrors(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, v[0]])));
-            else setFormError(e2.message);
+            if (Object.keys(d).length) {
+                setErrors(Object.fromEntries(Object.entries(d).map(([k, v]) => [k, v[0]])));
+                setFormError('Some settings need attention (marked below). Nothing was saved.');
+                window.scrollTo({ top: 0, behavior: 'smooth' }); // the message is at the top of the page
+            } else setFormError(e2.message);
         }
         setBusy(false);
     };
@@ -98,6 +101,12 @@ export default function Settings() {
                     <Card title="Files">
                         <TextField label={L('file_max_count')} type="number" min="1" value={values.file_max_count} onChange={set('file_max_count', num)} error={err('file_max_count')} />
                         <TextField label={L('file_max_mb')} type="number" min="1" value={values.file_max_mb} onChange={set('file_max_mb', num)} error={err('file_max_mb')} />
+                    </Card>
+                    <Card title="Tokens">
+                        <TextField label={L('default_daily_token_limit')} type="number" min="0" value={values.default_daily_token_limit} onChange={set('default_daily_token_limit', num)} error={err('default_daily_token_limit')}
+                            help="For anyone without their own limit. One allowance covers every chatbot and resets at midnight Philippine time." />
+                        <TextField label={L('system_daily_token_budget')} type="number" min="0" value={values.system_daily_token_budget} onChange={set('system_daily_token_budget', num)} error={err('system_daily_token_budget')}
+                            help="Separate from people's allowances. Leave empty for no limit." />
                     </Card>
                     <Card title="Security">
                         <SelectField label={L('sensitive_data_mode')} value={values.sensitive_data_mode} onChange={set('sensitive_data_mode')} error={err('sensitive_data_mode')}>

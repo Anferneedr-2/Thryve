@@ -175,6 +175,17 @@ class HermesAdapterTest extends TestCase
         $this->assertStringNotContainsString('secret', $e->getMessage());
     }
 
+    public function test_a_redirect_to_a_web_login_is_not_treated_as_a_bad_request_and_nothing_is_charged(): void
+    {
+        Http::fake(['*' => Http::response('', 302, ['Location' => '/login?next=%2Fv1%2Fchat%2Fcompletions'])]);
+
+        $e = $this->category(fn () => $this->hermes->chat(self::MSG));
+
+        $this->assertSame('unavailable', $e->category);
+        $this->assertTrue($e->retryable);
+        $this->assertFalse($e->ambiguous);
+    }
+
     public static function connectionErrors(): array
     {
         return [

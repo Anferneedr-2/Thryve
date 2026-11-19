@@ -152,6 +152,7 @@ class AgentService
             $r['ok'] => ($r['latency_ms'] ?? 0) > self::SLOW_MS ? 'slow' : 'working',
             $r['category'] === 'unauthorized' => 'key_rejected',
             $r['category'] === 'profile_missing' => 'profile_missing',
+            $r['category'] === 'login_page' => 'wrong_address',
             $r['category'] === 'no_key' => 'revoked',
             default => 'unreachable',
         };

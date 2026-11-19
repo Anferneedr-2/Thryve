@@ -9,11 +9,12 @@ import { ConfirmDialog, Dialog, Menu } from '../components/ui/Overlay';
 
 const STATUS = {
     never_tested: ['muted', 'Not tested yet'], working: ['success', 'Working'], slow: ['warning', 'Working, but slow'],
-    key_rejected: ['danger', 'Key rejected'], profile_missing: ['danger', 'Profile not found'], unreachable: ['warning', 'Not reachable'], revoked: ['danger', 'Revoked'],
+    key_rejected: ['danger', 'Key rejected'], profile_missing: ['danger', 'Profile not found'], unreachable: ['warning', 'Not reachable'], wrong_address: ['danger', 'Not the API address'], revoked: ['danger', 'Revoked'],
 };
 const CATEGORY = {
     ok: 'Working', unauthorized: 'The server rejected the key', profile_missing: 'The profile was not found on the server', unavailable: 'The server could not be reached',
     timeout: 'The server took too long to answer', rate_limited: 'The server is rate limiting', bad_response: 'The server gave an unexpected answer',
+    login_page: 'The address answered with a web login page, not the Hermes API. The API needs its own address.',
     no_key: 'The agent has no key', no_provider: 'No provider connection is available to run a message', budget_used: 'The background token budget is used up',
 };
 const KIND = { ping: 'Connection test', chat: 'Message test', verify: 'New key check' };
@@ -134,6 +135,11 @@ function AgentCard({ a, canManage, busyId, run, ask, edit, history }) {
                     )}
                 </div>
             </div>
+            {a.status === 'wrong_address' && (
+                <Alert tone="warning" title="This address shows a web login page">
+                    <p>The server answered, but with its web login instead of the Hermes API, so Thryve cannot use it. Set up a separate HTTPS address that goes straight to the Hermes API (port 8642), turn the API on with the key below, then edit this agent and use that address.</p>
+                </Alert>
+            )}
             <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2" style={{ margin: 0 }}>
                 <div><dt className="sl-help">Access key</dt><dd className="tnum">{a.has_key ? `Ends in ${a.key_fingerprint}` : 'None (revoked)'}</dd></div>
                 <div><dt className="sl-help">Last tested</dt><dd>{a.last_checked_at ? `${formatDateTime(a.last_checked_at)}${a.last_latency_ms !== null ? ` · ${a.last_latency_ms} ms` : ''}` : 'Never'}</dd></div>

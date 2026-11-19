@@ -71,7 +71,7 @@ class HealthChecker
         if ($all->isEmpty()) {
             return ['unknown', 'No AI agent is connected yet.'];
         }
-        $bad = $all->filter(fn ($a) => in_array($a->status, ['key_rejected', 'profile_missing', 'unreachable', 'revoked'], true));
+        $bad = $all->filter(fn ($a) => in_array($a->status, ['key_rejected', 'profile_missing', 'unreachable', 'wrong_address', 'revoked'], true));
         if ($bad->count() === $all->count()) {
             return ['fail', 'No agent passed its last test.'];
         }

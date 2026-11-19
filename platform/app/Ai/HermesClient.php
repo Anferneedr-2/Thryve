@@ -85,6 +85,7 @@ class HermesClient
             in_array($status, [401, 403], true) => $out(false, 'unauthorized'),
             $status === 429 => $out(false, 'rate_limited'),
             $status === 404 => $out(false, 'profile_missing'),
+            in_array($status, [301, 302, 303, 307, 308], true) => $out(false, 'login_page'), // a web login or redirect, not the API
             $status !== 200 => $out(false, 'unavailable'),
             default => $this->checkModels($response->json(), $profile, $out),
         };
@@ -150,6 +151,7 @@ class HermesClient
             throw match (true) {
                 in_array($status, [401, 403], true) => new ProviderException('unauthorized', retryable: true),
                 $status === 429 => new ProviderException('rate_limited', retryable: true),
+                $status >= 300 && $status < 400 => new ProviderException('unavailable', retryable: true), // answered with a login page: nothing was run
                 $status >= 500 => new ProviderException('unavailable', retryable: true, ambiguous: true),
                 default => new ProviderException('bad_request', retryable: false),
             };

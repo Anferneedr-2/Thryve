@@ -148,6 +148,7 @@ class AgentTest extends TestCase
             'profile not listed' => [200, ['other-bot'], 'profile_missing', 'profile_missing'],
             'server error' => [502, [], 'unavailable', 'unreachable'],
             'rate limited' => [429, [], 'rate_limited', 'unreachable'],
+            'web login page' => [302, [], 'login_page', 'wrong_address'],
         ];
     }
 
