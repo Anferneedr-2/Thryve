@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { get, send } from '../lib/api';
+import { get, send, upload } from '../lib/api';
 import { errorText } from '../lib/util';
 import { Markdown } from '../lib/markdown';
 import { useToast } from '../components/ui/Feedback';
@@ -17,6 +17,19 @@ const SUGGESTIONS = [
 ];
 
 const fmt = (n) => Number(n).toLocaleString();
+const sizeText = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
+
+function FileChip({ name, size, tone, children }) {
+    return (
+        <span className={`chat-chip ${tone ?? ''}`}>
+            <Icon name="file" />
+            <span className="n">{name}</span>
+            {size ? <span className="s">{sizeText(size)}</span> : null}
+            {children}
+        </span>
+    );
+}
 
 function UsageMeter({ usage }) {
     if (!usage) return null;
@@ -51,6 +64,9 @@ export default function Chat() {
     const [removing, setRemoving] = useState(null);
     const [editing, setEditing] = useState(null); // {id, text}
     const [sidebar, setSidebar] = useState(false);
+    const [files, setFiles] = useState([]); // {key, id?, name, size, status: uploading|ready|error, error?}
+    const [limits, setLimits] = useState({ max_count: 6, max_mb: 15, types: ['txt', 'md', 'csv', 'docx', 'xlsx'] });
+    const picker = useRef(null);
     const abort = useRef(null);
     const endRef = useRef(null);
     const box = useRef(null);
@@ -59,7 +75,31 @@ export default function Chat() {
     const loadUsage = useCallback(() => get('/usage/today').then(setUsage).catch(() => {}), []);
     const loadList = useCallback(() => get(`/conversations?archived=${showArchived ? 1 : 0}${query ? `&q=${encodeURIComponent(query)}` : ''}`).then(setList).catch(() => setList([])), [showArchived, query]);
 
-    useEffect(() => { loadUsage(); }, [loadUsage]);
+    useEffect(() => { loadUsage(); get('/attachments/limits').then(setLimits).catch(() => {}); }, [loadUsage]);
+
+    const attach = async (picked) => {
+        let slots = limits.max_count - files.length;
+        for (const f of picked) {
+            const key = `${Date.now()}-${Math.random()}`;
+            const bad = slots <= 0 ? `Up to ${limits.max_count} files per message.`
+                : !limits.types.includes(extOf(f.name)) ? `Not supported. Use ${limits.types.map((t) => `.${t}`).join(', ')}.`
+                : f.size > limits.max_mb * 1048576 ? `Larger than ${limits.max_mb} MB.` : null;
+            if (bad) { setFiles((l) => [...l, { key, name: f.name, size: f.size, status: 'error', error: bad }]); continue; }
+            slots -= 1;
+            setFiles((l) => [...l, { key, name: f.name, size: f.size, status: 'uploading' }]);
+            const form = new FormData(); form.append('file', f);
+            try {
+                const a = await upload('/attachments', form);
+                setFiles((l) => l.map((x) => (x.key === key ? { ...x, id: a.id, status: 'ready', truncated: a.truncated } : x)));
+            } catch (e) {
+                setFiles((l) => l.map((x) => (x.key === key ? { ...x, status: 'error', error: errorText(e) } : x)));
+            }
+        }
+    };
+    const dropFile = async (f) => {
+        setFiles((l) => l.filter((x) => x.key !== f.key));
+        if (f.id) { try { await send('DELETE', `/attachments/${f.id}`); } catch { /* it will simply stay unsent */ } }
+    };
     useEffect(() => { const t = setTimeout(loadList, query ? 250 : 0); return () => clearTimeout(t); }, [loadList, query]);
     useEffect(() => { if (stick.current) endRef.current?.scrollIntoView({ block: 'end' }); }, [current?.messages?.length, busy]);
 
@@ -81,6 +121,7 @@ export default function Chat() {
             const conv = r.data.conversation;
             setCurrent(await get(`/conversations/${conv.id}`));
             loadList(); loadUsage(); stick.current = true;
+            return true;
         } catch (e) {
             if (e.name === 'AbortError') {
                 setError({ message: 'Stopped. The assistant may still finish in the background: reopen this conversation in a minute to see it.', code: 'stopped' });
@@ -100,12 +141,16 @@ export default function Chat() {
 
     const post = (path, method, body, signal) => fetchJson(path, method, body, signal);
 
-    const submit = (text = draft) => {
+    const uploading = files.some((f) => f.status === 'uploading');
+    const submit = async (text = draft) => {
         const t = text.trim();
-        if (!t || busy) return;
+        if (!t || busy || uploading) return;
+        const ids = files.filter((f) => f.status === 'ready').map((f) => f.id);
         const restore = () => setDraft(t);
         setDraft(''); setPendingText(t);
-        run((signal, ack) => post('/chat', 'POST', { message: t, conversation_id: current?.id, acknowledge_sensitive: ack || undefined }, signal), restore);
+        // Files are cleared only after a successful send, so a failed send keeps both the text and the files.
+        const ok = await run((signal, ack) => post('/chat', 'POST', { message: t, conversation_id: current?.id, acknowledge_sensitive: ack || undefined, attachment_ids: ids }, signal), restore);
+        if (ok) setFiles((l) => l.filter((f) => !ids.includes(f.id)));
     };
 
     const stop = () => abort.current?.abort();
@@ -203,6 +248,15 @@ export default function Chat() {
                                         <p className="chat-note">Messages after this one are replaced, and the new answer uses tokens again.</p>
                                     </div>
                                 ) : m.role === 'user' ? <p className="plain">{m.content}</p> : <Markdown text={m.content} />}
+                                {m.attachments?.length > 0 && (
+                                    <div className="chat-chips">
+                                        {m.attachments.map((a) => (
+                                            <a key={a.id} className="chat-chip link" href={`/api/attachments/${a.id}/download`} download aria-label={`Download ${a.name}`}>
+                                                <Icon name="file" /><span className="n">{a.name}</span><span className="s">{sizeText(a.size)}</span><Icon name="download" />
+                                            </a>
+                                        ))}
+                                    </div>
+                                )}
                                 {editing?.id !== m.id && (
                                     <div className="chat-actions">
                                         <IconButton icon="copy" label="Copy" onClick={() => copy(m.content)} />
@@ -232,12 +286,26 @@ export default function Chat() {
                         </Alert>
                     )}
                     <UsageMeter usage={usage} />
+                    {files.length > 0 && (
+                        <div className="chat-chips" aria-label="Attached files">
+                            {files.map((f) => (
+                                <FileChip key={f.key} name={f.name} size={f.size} tone={f.status === 'error' ? 'bad' : ''}>
+                                    {f.status === 'uploading' && <span className="s" role="status">Uploading…</span>}
+                                    {f.status === 'ready' && f.truncated && <span className="s" title="Only the first part of this file is sent">shortened</span>}
+                                    {f.status === 'error' && <span className="s err" role="alert">{f.error}</span>}
+                                    <button type="button" className="x" aria-label={`Remove ${f.name}`} onClick={() => dropFile(f)}><Icon name="x" /></button>
+                                </FileChip>
+                            ))}
+                        </div>
+                    )}
                     <div className="chat-composer">
+                        <input ref={picker} type="file" multiple hidden accept={limits.types.map((t) => `.${t}`).join(',')} onChange={(e) => { attach([...e.target.files]); e.target.value = ''; }} />
+                        <IconButton icon="clip" label="Attach files" disabled={busy || exhausted} onClick={() => picker.current?.click()} />
                         <textarea ref={box} className="sl-textarea" rows={2} aria-label="Message" placeholder={exhausted ? 'Your tokens for today are used up' : 'Message the assistant (Enter to send, Shift+Enter for a new line)'}
                             value={draft} disabled={exhausted} maxLength={20000} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
                         {busy
                             ? <Button variant="dark" icon="stop" onClick={stop}>Stop</Button>
-                            : <Button variant="primary" icon="up" disabled={!draft.trim() || exhausted} onClick={() => submit()}>Send</Button>}
+                            : <Button variant="primary" icon="up" disabled={!draft.trim() || exhausted || uploading} onClick={() => submit()}>Send</Button>}
                     </div>
                     <p className="chat-note">AI answers can be wrong: check anything important. Do not enter passwords, card numbers or ID numbers.</p>
                 </div>

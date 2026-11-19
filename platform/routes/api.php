@@ -63,6 +63,12 @@ Route::middleware(['web', 'installed'])->group(function () {
         Route::patch('/conversations/{id}/messages/{messageId}', [\App\Http\Controllers\ChatController::class, 'edit'])->whereNumber(['id', 'messageId'])->middleware('throttle:30,1');
         Route::post('/conversations/{id}/messages/{messageId}/rating', [\App\Http\Controllers\ChatController::class, 'rate'])->whereNumber(['id', 'messageId']);
 
+        // Chat attachments: own files only.
+        Route::get('/attachments/limits', [\App\Http\Controllers\AttachmentController::class, 'limits']);
+        Route::post('/attachments', [\App\Http\Controllers\AttachmentController::class, 'store'])->middleware('throttle:60,1');
+        Route::delete('/attachments/{id}', [\App\Http\Controllers\AttachmentController::class, 'destroy'])->whereNumber('id');
+        Route::get('/attachments/{id}/download', [\App\Http\Controllers\AttachmentController::class, 'download'])->whereNumber('id');
+
         // Own token allowance (never any provider detail).
         Route::get('/usage/today', [UsageController::class, 'mine']);
 

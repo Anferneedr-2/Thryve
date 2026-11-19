@@ -7,6 +7,7 @@ use App\Ai\NoProviderAvailable;
 use App\Ai\ProviderException;
 use App\Ai\TokenLimitReached;
 use App\Http\Responses\Api;
+use App\Models\Attachment;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Support\Settings;
@@ -51,17 +52,23 @@ class ChatController extends Controller
             'message' => ['required', 'string', 'max:20000'],
             'conversation_id' => ['nullable', 'integer'],
             'acknowledge_sensitive' => ['nullable', 'boolean'],
+            'attachment_ids' => ['nullable', 'array'],
+            'attachment_ids.*' => ['integer'],
         ]);
         $text = trim($d['message']);
         if ($text === '') {
             return Api::error('validation_failed', 'Type a message first.', 422, ['message' => ['Type a message first.']]);
         }
-        if ($blocked = $this->sensitiveResponse($text, (bool) ($d['acknowledge_sensitive'] ?? false))) {
+        $files = $this->files($request, $d['attachment_ids'] ?? []);
+        if ($files instanceof JsonResponse) {
+            return $files;
+        }
+        if ($blocked = $this->sensitiveResponse($text.' '.$files->pluck('extracted_text')->implode(' '), (bool) ($d['acknowledge_sensitive'] ?? false))) {
             return $blocked;
         }
 
         $c = isset($d['conversation_id']) ? $this->mine($request, $d['conversation_id']) : $this->chat->start($request->user(), $text);
-        $this->chat->addUserMessage($c, $text);
+        $this->chat->addUserMessage($c, $text, $files);
 
         return $this->respond($request, $c);
     }
@@ -92,7 +99,8 @@ class ChatController extends Controller
             return $blocked;
         }
         $this->chat->supersedeFrom($c, $original);
-        $this->chat->addUserMessage($c, $text);
+        $new = $this->chat->addUserMessage($c, $text);
+        $this->chat->carryFiles($original, $new);
 
         return $this->respond($request, $c);
     }
@@ -127,6 +135,22 @@ class ChatController extends Controller
         $this->mine($request, $id)->update(['deleted_at' => now()]);
 
         return Api::ok(null);
+    }
+
+    /** Files named in a send must be this person's own, unsent, and within the per-message limit. */
+    private function files(Request $request, array $ids): \Illuminate\Support\Collection|JsonResponse
+    {
+        $ids = array_values(array_unique($ids));
+        $max = (int) Settings::get('file_max_count');
+        if (count($ids) > $max) {
+            return Api::error('too_many_files', "You can attach up to {$max} files to a message.", 422);
+        }
+        $files = Attachment::where('user_id', $request->user()->id)->whereNull('message_id')->whereIn('id', $ids)->get();
+        if ($files->count() !== count($ids)) {
+            return Api::error('file_not_found', 'One of the attached files is no longer available. Remove it and attach it again.', 422);
+        }
+
+        return $files;
     }
 
     private function sensitiveResponse(string $text, bool $acknowledged): ?JsonResponse
@@ -175,6 +199,7 @@ class ChatController extends Controller
 
     private function message(Message $m): array
     {
-        return ['id' => $m->id, 'role' => $m->role, 'content' => $m->content, 'rating' => $m->rating, 'created_at' => $m->created_at->toIso8601String()];
+        return ['id' => $m->id, 'role' => $m->role, 'content' => $m->content, 'rating' => $m->rating, 'created_at' => $m->created_at->toIso8601String(),
+            'attachments' => Attachment::where('message_id', $m->id)->orderBy('id')->get()->map(fn ($a) => AttachmentController::present($a))->all()];
     }
 }

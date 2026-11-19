@@ -2,6 +2,7 @@
 
 namespace App\Ai;
 
+use App\Models\Attachment;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
@@ -31,12 +32,22 @@ class ChatService
         return Conversation::create(['user_id' => $user->id, 'title' => $this->titleFrom($text)]);
     }
 
-    public function addUserMessage(Conversation $c, string $text): Message
+    /** @param  iterable<Attachment>  $files  already checked to belong to this person and to be unsent */
+    public function addUserMessage(Conversation $c, string $text, iterable $files = []): Message
     {
         $m = Message::create(['conversation_id' => $c->id, 'role' => 'user', 'content' => $text]);
+        foreach ($files as $f) {
+            $f->update(['message_id' => $m->id, 'conversation_id' => $c->id]);
+        }
         $c->update(['last_message_at' => now()]);
 
         return $m;
+    }
+
+    /** An edited message keeps the files of the message it replaces. */
+    public function carryFiles(Message $from, Message $to): void
+    {
+        Attachment::where('message_id', $from->id)->update(['message_id' => $to->id]);
     }
 
     /**
@@ -80,15 +91,20 @@ class ChatService
     /** @return list<array{role: string, content: string}> newest messages that fit, oldest first */
     private function context(Conversation $c): array
     {
-        $rows = $c->messages()->whereNull('superseded_at')->orderByDesc('id')->get(['role', 'content']);
+        $rows = $c->messages()->whereNull('superseded_at')->orderByDesc('id')->get(['id', 'role', 'content']);
+        $files = Attachment::whereIn('message_id', $rows->pluck('id'))->orderBy('id')->get()->groupBy('message_id');
         $kept = [];
         $size = 0;
         foreach ($rows as $r) {
-            $size += strlen($r->content);
+            $content = $r->content;
+            foreach ($files[$r->id] ?? [] as $f) {
+                $content .= "\n\n[Attached file: {$f->original_name}".($f->truncated ? ' (shortened)' : '')."]\n{$f->extracted_text}\n[End of file]";
+            }
+            $size += strlen($content);
             if ($kept && $size > self::CONTEXT_CHARS) {
                 break;
             }
-            $kept[] = ['role' => $r->role, 'content' => $r->content];
+            $kept[] = ['role' => $r->role, 'content' => $content];
         }
 
         return array_reverse($kept);
