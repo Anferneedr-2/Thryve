@@ -20,7 +20,7 @@ class HealthChecker
         return [
             $this->check('database', 'Database', fn () => $this->database()),
             $this->check('hermes', 'Hermes (AI service)', fn () => $this->hermes()),
-            $this->check('providers', 'AI providers', fn () => ['unknown', 'Provider connections are set up in a later release.']),
+            $this->check('providers', 'AI providers', fn () => $this->providers()),
             $this->check('email', 'Email (SMTP)', fn () => $this->email()),
             $this->check('scheduler', 'Scheduler (cron)', fn () => $this->scheduler()),
             $this->check('queue', 'Background jobs', fn () => $this->queue()),
@@ -62,6 +62,20 @@ class HealthChecker
 
         // Reachability only; the Hermes contract is verified in a later release (plan D02).
         return ['ok', "The server answered (HTTP {$status})."];
+    }
+
+    private function providers(): array
+    {
+        $all = \App\Models\ProviderConnection::active()->where('is_enabled', true)->get();
+        if ($all->isEmpty()) {
+            return ['unknown', 'No AI provider is connected yet.'];
+        }
+        $good = $all->filter(fn ($c) => ! in_array($c->status, ['reauth_required', 'quota_exhausted'], true) && ! ($c->unavailable_until && $c->unavailable_until->isFuture()))->count();
+        if ($good === 0) {
+            return ['fail', 'None of the connected providers can take requests right now.'];
+        }
+
+        return $good < $all->count() ? ['warn', "{$good} of {$all->count()} providers can take requests."] : ['ok', "{$good} provider(s) ready."];
     }
 
     private function email(): array

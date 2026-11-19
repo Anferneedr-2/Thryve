@@ -47,7 +47,7 @@ export function Tabs({ tabs, value, onChange }) {
     );
 }
 
-// Top navigation: below 1024px the links collapse into a menu button. The reference says 640px, but an admin's links
+// Top navigation: below 1280px the links collapse into a menu button. The reference says 640px, but an admin's links
 // (up to eight for a Super Admin) overflow the bar well past that, so the collapse point is higher (recorded in the plan).
 export function AppNav({ brand = 'Thryve', links, current, onNavigate, right }) {
     const [open, setOpen] = useState(false);
@@ -60,17 +60,17 @@ export function AppNav({ brand = 'Thryve', links, current, onNavigate, right }) 
         <header className="mx-auto w-full max-w-[1200px] px-6 pt-4">
             <nav className="sl-nav" aria-label="Main">
                 <span className="logo">{brand}</span>
-                <div className="hidden items-center gap-1.5 lg:flex">
+                <div className="hidden items-center gap-1.5 xl:flex">
                     {links.map((l) => (
                         <a key={l.id} href={l.href} className={`l ${current === l.id ? 'on' : ''}`} aria-current={current === l.id ? 'page' : undefined} onClick={(e) => go(e, l.id)}>{l.label}</a>
                     ))}
                 </div>
                 {right}
                 <IconButton icon={theme === 'dark' ? 'sun' : 'moon'} label="Switch theme" round onClick={() => setThemeState(toggleTheme())} />
-                <IconButton icon={open ? 'x' : 'menu'} label="Menu" className="lg:!hidden" aria-expanded={open} onClick={() => setOpen(!open)} />
+                <IconButton icon={open ? 'x' : 'menu'} label="Menu" className="xl:!hidden" aria-expanded={open} onClick={() => setOpen(!open)} />
             </nav>
             {open && (
-                <div className="sl-menu mt-2 lg:hidden" role="group" aria-label="Pages">
+                <div className="sl-menu mt-2 xl:hidden" role="group" aria-label="Pages">
                     {links.map((l) => (
                         <a key={l.id} href={l.href} className="it" aria-current={current === l.id ? 'page' : undefined} onClick={(e) => go(e, l.id, true)}>{l.label}</a>
                     ))}

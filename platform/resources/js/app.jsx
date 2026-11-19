@@ -19,10 +19,11 @@ import System from './pages/System';
 import InstallWizard from './pages/InstallWizard';
 import Login from './pages/Login';
 import People from './pages/People';
+import Providers from './pages/Providers';
 import PolicyAck from './pages/PolicyAck';
 import TokenGallery from './pages/TokenGallery';
 
-const ADMIN_ONLY = new Set(['/people', '/departments', '/team-attendance', '/settings', '/system']);
+const ADMIN_ONLY = new Set(['/people', '/departments', '/team-attendance', '/providers', '/settings', '/system']);
 
 function Screen() {
     const { path, navigate } = useRouter();
@@ -31,6 +32,7 @@ function Screen() {
 
     if (path === '/people' && isAdmin) return <People />;
     if (path === '/departments' && isAdmin) return <Departments />;
+    if (path === '/providers' && isAdmin) return <Providers />;
     if (path === '/team-attendance' && isAdmin) return <TeamAttendance />;
     if (path === '/settings' && user.role === 'super_admin') return <Settings />;
     if (path === '/system' && user.role === 'super_admin') return <System />;

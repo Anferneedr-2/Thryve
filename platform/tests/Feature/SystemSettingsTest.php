@@ -261,7 +261,7 @@ class SystemSettingsTest extends TestCase
         $this->assertSame('unknown', $byKey['hermes']['status'], 'Hermes is not configured in tests');
         $this->assertSame('unknown', $byKey['email']['status']);
         $this->assertSame('fail', $byKey['scheduler']['status'], 'the scheduler has never run');
-        $this->assertSame('ok', $byKey['storage']['status']);
+        $this->assertContains($byKey['storage']['status'], ['ok', 'warn'], 'warn only when the host disk is nearly full');
         foreach ($byKey as $check) {
             $this->assertContains($check['status'], ['ok', 'warn', 'fail', 'unknown']);
             $this->assertNotEmpty($check['checked_at']);

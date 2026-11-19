@@ -9,10 +9,13 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\InstallController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PolicyController;
+use App\Http\Controllers\PriceController;
+use App\Http\Controllers\ProviderController;
 use App\Http\Controllers\SessionAdminController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SystemController;
 use App\Http\Controllers\UpdateController;
+use App\Http\Controllers\UsageController;
 use App\Http\Controllers\UserController;
 use App\Http\Responses\Api;
 use Illuminate\Support\Facades\Route;
@@ -50,6 +53,9 @@ Route::middleware(['web', 'installed'])->group(function () {
         Route::post('/notifications/read-all', [NotificationController::class, 'readAll']);
         Route::post('/notifications/{id}/read', [NotificationController::class, 'read'])->whereNumber('id');
 
+        // Own token allowance (never any provider detail).
+        Route::get('/usage/today', [UsageController::class, 'mine']);
+
         // Own attendance (never anyone else's).
         Route::post('/attendance/heartbeat', [AttendanceController::class, 'heartbeat'])->middleware('throttle:20,1');
         Route::post('/attendance/close', [AttendanceController::class, 'close']);
@@ -64,6 +70,12 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/users/{user}/deactivate', [UserController::class, 'deactivate']);
             Route::post('/users/{user}/reactivate', [UserController::class, 'reactivate']);
             Route::post('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
+
+            // Providers and usage: Admins monitor (read-only); only Super Admin changes anything (group below).
+            Route::get('/providers', [ProviderController::class, 'index']);
+            Route::get('/prices', [PriceController::class, 'index']);
+            Route::get('/usage/summary', [UsageController::class, 'summary']);
+            Route::post('/users/{user}/token-grants', [UsageController::class, 'grant']);
 
             Route::get('/attendance', [AttendanceAdminController::class, 'index']);
             Route::post('/attendance/corrections', [AttendanceAdminController::class, 'correct']);
@@ -83,6 +95,15 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/settings/smtp-test', [SettingsController::class, 'smtpTest'])->middleware('throttle:10,1');
             Route::post('/settings/branding', [BrandingController::class, 'upload']);
             Route::delete('/settings/branding/{kind}', [BrandingController::class, 'destroy']);
+            Route::post('/providers', [ProviderController::class, 'store']);
+            Route::post('/providers/reorder', [ProviderController::class, 'reorder']);
+            Route::patch('/providers/{provider}', [ProviderController::class, 'update']);
+            Route::post('/providers/{provider}/reauthenticate', [ProviderController::class, 'reauthenticate']);
+            Route::post('/providers/{provider}/check', [ProviderController::class, 'check'])->middleware('throttle:20,1');
+            Route::post('/providers/{provider}/quota', [ProviderController::class, 'quota']);
+            Route::delete('/providers/{provider}', [ProviderController::class, 'destroy']);
+            Route::post('/prices', [PriceController::class, 'store']);
+
             Route::get('/system/health', [SystemController::class, 'health']);
 
             // Updates and backups (maintenance mode lets this browser keep working while others see the notice).
