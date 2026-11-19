@@ -10,7 +10,7 @@ const ROLE_LABEL = { employee: 'Employee', admin: 'Admin', super_admin: 'Super A
 
 // Navigation depends on role for convenience only; the server enforces every permission.
 export function linksFor(user) {
-    const links = [{ id: '/', label: 'Home', href: '/' }, { id: '/attendance', label: 'Attendance', href: '/attendance' }];
+    const links = [{ id: '/', label: 'Home', href: '/' }, { id: '/chat', label: 'Assistant', href: '/chat' }, { id: '/attendance', label: 'Attendance', href: '/attendance' }];
     if (user.role === 'admin' || user.role === 'super_admin') {
         links.push(
             { id: '/team-attendance', label: 'Team', href: '/team-attendance' },

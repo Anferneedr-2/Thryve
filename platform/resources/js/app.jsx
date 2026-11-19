@@ -12,6 +12,7 @@ import Account from './pages/Account';
 import Attendance from './pages/Attendance';
 import TeamAttendance from './pages/TeamAttendance';
 import ComponentGallery from './pages/ComponentGallery';
+import Chat from './pages/Chat';
 import Departments from './pages/Departments';
 import Home from './pages/Home';
 import Settings from './pages/Settings';
@@ -36,6 +37,7 @@ function Screen() {
     if (path === '/team-attendance' && isAdmin) return <TeamAttendance />;
     if (path === '/settings' && user.role === 'super_admin') return <Settings />;
     if (path === '/system' && user.role === 'super_admin') return <System />;
+    if (path === '/chat') return <Chat />;
     if (path === '/attendance') return <Attendance />;
     if (path === '/account') return <Account />;
     if (path === '/') return <Home />;

@@ -53,6 +53,16 @@ Route::middleware(['web', 'installed'])->group(function () {
         Route::post('/notifications/read-all', [NotificationController::class, 'readAll']);
         Route::post('/notifications/{id}/read', [NotificationController::class, 'read'])->whereNumber('id');
 
+        // Own conversations (private to the signed-in person).
+        Route::get('/conversations', [\App\Http\Controllers\ChatController::class, 'index']);
+        Route::post('/chat', [\App\Http\Controllers\ChatController::class, 'send'])->middleware('throttle:30,1');
+        Route::get('/conversations/{id}', [\App\Http\Controllers\ChatController::class, 'show'])->whereNumber('id');
+        Route::patch('/conversations/{id}', [\App\Http\Controllers\ChatController::class, 'update'])->whereNumber('id');
+        Route::delete('/conversations/{id}', [\App\Http\Controllers\ChatController::class, 'destroy'])->whereNumber('id');
+        Route::post('/conversations/{id}/regenerate', [\App\Http\Controllers\ChatController::class, 'regenerate'])->whereNumber('id')->middleware('throttle:30,1');
+        Route::patch('/conversations/{id}/messages/{messageId}', [\App\Http\Controllers\ChatController::class, 'edit'])->whereNumber(['id', 'messageId'])->middleware('throttle:30,1');
+        Route::post('/conversations/{id}/messages/{messageId}/rating', [\App\Http\Controllers\ChatController::class, 'rate'])->whereNumber(['id', 'messageId']);
+
         // Own token allowance (never any provider detail).
         Route::get('/usage/today', [UsageController::class, 'mine']);
 

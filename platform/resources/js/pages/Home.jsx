@@ -19,7 +19,10 @@ export default function Home() {
                 </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-                <Card title="AI assistant" icon="chat"><p>The assistant, attendance and usage views arrive in the next releases.</p></Card>
+                <Card title="AI assistant" icon="chat">
+                    <p>Get help with writing, summarizing and planning your everyday work.</p>
+                    <div><Button size="sm" variant="primary" onClick={() => navigate('/chat')}>Open the assistant</Button></div>
+                </Card>
                 {isAdmin && (
                     <Card title="People" icon="users">
                         <p>Add employees, assign departments and manage accounts.</p>
