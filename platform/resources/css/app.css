@@ -1,0 +1,89 @@
+@import 'tailwindcss';
+@import './tokens.css';
+@import './components.css';
+
+@source '../../storage/framework/views/*.php';
+
+/* Tailwind utilities map onto the brand CSS variables (no competing palette). */
+@theme inline {
+    --font-sans: var(--font-body);
+    --font-display: var(--font-display);
+    --font-mono: var(--font-mono);
+
+    --color-brand: var(--brand);
+    --color-brand-hover: var(--brand-hover);
+    --color-blue-50: var(--blue-50);
+    --color-blue-100: var(--blue-100);
+    --color-blue-200: var(--blue-200);
+    --color-blue-500: var(--blue-500);
+    --color-blue-600: var(--blue-600);
+    --color-blue-700: var(--blue-700);
+    --color-navy: var(--navy-900);
+    --color-slate-50: var(--slate-50);
+    --color-slate-100: var(--slate-100);
+    --color-slate-200: var(--slate-200);
+    --color-slate-400: var(--slate-400);
+    --color-slate-450: var(--slate-450);
+    --color-slate-500: var(--slate-500);
+    --color-slate-700: var(--slate-700);
+    --color-surface: var(--surface);
+    --color-field-border: var(--field-border);
+    --color-placeholder: var(--placeholder);
+    --color-success: var(--green-700);
+    --color-success-bg: var(--green-50);
+    --color-success-line: var(--green-200);
+    --color-warning: var(--amber-700);
+    --color-warning-bg: var(--amber-50);
+    --color-warning-line: var(--amber-200);
+    --color-danger: var(--red-600);
+    --color-danger-bg: var(--red-50);
+    --color-danger-line: var(--red-200);
+
+    --radius-sm: var(--r-sm);
+    --radius-md: var(--r-md);
+    --radius-card: var(--r-card);
+    --radius-panel: var(--r-panel);
+    --radius-pill: var(--r-pill);
+
+    --shadow-sm: var(--sh-sm);
+    --shadow-md: var(--sh-md);
+    --shadow-lg: var(--sh-lg);
+    --shadow-blue: var(--sh-blue);
+
+    --ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Base: mirrors the reference page chrome (lines 86-96). In @layer base so utilities can override. */
+@layer base {
+html { scroll-behavior: smooth; color-scheme: light; }
+html[data-theme='dark'] { color-scheme: dark; }
+body {
+    margin: 0;
+    background: var(--slate-50);
+    color: var(--sl-text);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 {
+    margin: 0;
+    color: var(--navy-900);
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.12;
+    text-wrap: balance;
+}
+code, pre { font-family: var(--font-mono); }
+button { font-family: inherit; }
+:focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; }
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+.ic { width: 1em; height: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
