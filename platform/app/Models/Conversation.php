@@ -14,6 +14,11 @@ class Conversation extends Model
         return ['archived_at' => 'datetime', 'deleted_at' => 'datetime', 'last_message_at' => 'datetime'];
     }
 
+    public function agent(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Agent::class);
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(Message::class);

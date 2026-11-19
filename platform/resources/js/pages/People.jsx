@@ -113,6 +113,45 @@ function ResetPasswordDialog({ person, onClose }) {
     );
 }
 
+// Which extra chatbots an employee may use. The default chatbot is always on; Admins and Super Admins use every enabled one.
+function ChatbotAccessDialog({ person, onClose }) {
+    const toast = useToast();
+    const [data, setData] = useState(null);
+    const [picked, setPicked] = useState([]);
+    const [error, setError] = useState(null);
+    const [busy, setBusy] = useState(false);
+    useEffect(() => {
+        get(`/users/${person.id}/agents`).then((d) => { setData(d); setPicked(d.agents.filter((a) => !a.is_default && a.assigned).map((a) => a.id)); }).catch((e) => setError(errorText(e)));
+    }, [person.id]);
+    const toggle = (id) => setPicked((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+    const save = async () => {
+        setBusy(true); setError(null);
+        try { await send('PUT', `/users/${person.id}/agents`, { agent_ids: picked }); toast(`Chatbot access saved for ${person.name}`); onClose(); } catch (err) { setError(errorText(err)); setBusy(false); }
+    };
+    const extra = data?.agents.filter((a) => !a.is_default) ?? [];
+    return (
+        <Dialog open title={`Chatbot access for ${person.name}`} onClose={onClose}
+            actions={<><Button onClick={onClose}>Cancel</Button>{!data?.all_access && <Button variant="primary" disabled={busy || !data} onClick={save}>{busy ? 'Saving...' : 'Save'}</Button>}</>}>
+            <div className="grid gap-3">
+                {error && <Alert tone="danger" title="Could not load or save">{error}</Alert>}
+                {!data && !error && <Skeleton lines={3} />}
+                {data?.all_access && <p>Admins and Super Admins can use every enabled chatbot.</p>}
+                {data && !data.all_access && (
+                    <>
+                        {data.agents.filter((a) => a.is_default).map((a) => (
+                            <label key={a.id} className="sl-opt"><input type="checkbox" className="sl-cb" checked disabled readOnly /><span>{a.name} <Pill tone="info">Everyone</Pill>{a.description && <><br /><span className="sl-help">{a.description}</span></>}</span></label>
+                        ))}
+                        {extra.length === 0 && <p className="sl-help">No other chatbots yet. Add agents under AI agents.</p>}
+                        {extra.map((a) => (
+                            <label key={a.id} className="sl-opt"><input type="checkbox" className="sl-cb" checked={picked.includes(a.id)} onChange={() => toggle(a.id)} /><span>{a.name}{!a.is_enabled && <> <Pill>Disabled</Pill></>}{a.description && <><br /><span className="sl-help">{a.description}</span></>}</span></label>
+                        ))}
+                    </>
+                )}
+            </div>
+        </Dialog>
+    );
+}
+
 export default function People() {
     const { user: me } = useAuth();
     const toast = useToast();
@@ -147,6 +186,7 @@ export default function People() {
         const items = [];
         if (canManage(me, p)) {
             items.push({ label: 'Edit', icon: 'edit', onSelect: () => setDialog({ type: 'edit', person: p }) });
+            items.push({ label: 'Chatbot access', icon: 'chat', onSelect: () => setDialog({ type: 'access', person: p }) });
             items.push({ label: 'Reset password', icon: 'sliders', onSelect: () => setDialog({ type: 'reset', person: p }) });
             if (me.role === 'super_admin' && p.is_active && p.id !== me.id) items.push({ label: 'End session', icon: 'x', onSelect: () => setDialog({ type: 'terminate', person: p }) });
             if (p.id !== me.id) {
@@ -211,6 +251,7 @@ export default function People() {
                 <PersonForm person={dialog.person} departments={departments} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); load(); }} />
             )}
             {dialog?.type === 'reset' && <ResetPasswordDialog person={dialog.person} onClose={() => setDialog(null)} />}
+            {dialog?.type === 'access' && <ChatbotAccessDialog person={dialog.person} onClose={() => setDialog(null)} />}
             <ConfirmDialog open={dialog?.type === 'deactivate'} onCancel={() => setDialog(null)} confirmLabel="Deactivate" title={`Deactivate ${dialog?.person?.name ?? ''}?`}
                 onConfirm={() => { const p = dialog.person; setDialog(null); act(() => send('POST', `/users/${p.id}/deactivate`), `${p.name} deactivated`); }}>
                 They are signed out and cannot sign in. Their history is kept and you can reactivate them later.

@@ -3,10 +3,7 @@
 namespace Tests\Feature;
 
 use App\Ai\HermesClient;
-use App\Ai\NoProviderAvailable;
 use App\Ai\ProviderException;
-use App\Ai\ProviderRouter;
-use App\Models\ProviderConnection;
 use App\Models\Role;
 use App\Models\UsageRecord;
 use App\Models\User;
@@ -78,14 +75,14 @@ class HermesAdapterTest extends TestCase
             && $req['model'] === 'thryve-bot' && $req['stream'] === false && $req['messages'] === self::MSG);
     }
 
-    public function test_connection_credentials_override_the_server_key(): void
+    public function test_an_explicit_target_sends_its_own_address_key_and_model(): void
     {
         Http::fake(['*' => Http::response($this->success())]);
-        $c = ProviderConnection::create(['name' => 'vps', 'kind' => 'hermes', 'priority' => 1, 'credentials' => 'connection-key-999999']);
 
-        $this->hermes->chat(self::MSG, $c);
+        $this->hermes->chat(self::MSG, ['agent_id' => 1, 'url' => 'https://coach.example.com/p/coach', 'key' => 'coach-key-999999', 'model' => 'coach']);
 
-        Http::assertSent(fn ($req) => $req->hasHeader('Authorization', 'Bearer connection-key-999999'));
+        Http::assertSent(fn ($req) => $req->url() === 'https://coach.example.com/p/coach/v1/chat/completions'
+            && $req->hasHeader('Authorization', 'Bearer coach-key-999999') && $req['model'] === 'coach');
     }
 
     public function test_missing_usage_is_estimated_and_flagged(): void
@@ -199,77 +196,47 @@ class HermesAdapterTest extends TestCase
         $this->assertStringNotContainsString('hermes.test', $e->getMessage());
     }
 
-    // ---- through the router and ledger ------------------------------------------------------------
+    // ---- ping (used for reachability checks) ----------------------------------------------------
 
-    private function route(User $user, string $id = 'r1'): array
+    public function test_hermes_reports_not_configured_without_an_address(): void
     {
-        return app(ProviderRouter::class)->run($user, $id, 'thryve-bot', fn ($c) => $this->hermes->chat(self::MSG, $c));
+        config(['services.hermes.url' => null]);
+        Http::fake();
+
+        $this->assertSame(['ok' => false, 'category' => 'not_configured', 'status' => null], $this->hermes->ping());
+        Http::assertNothingSent();
     }
 
-    private function employee(): User
+    public function test_hermes_ping_classifies_answers_and_sends_the_key_only_as_a_bearer_token(): void
     {
-        return User::factory()->role(Role::EMPLOYEE)->create(['daily_token_limit' => 1000000]);
-    }
+        config(['services.hermes.url' => 'https://hermes.example.com', 'services.hermes.key' => 'super-secret-key']);
+        $cases = [200 => ['ok', true], 404 => ['ok', true], 401 => ['unauthorized', false], 403 => ['unauthorized', false], 429 => ['rate_limited', false], 500 => ['unavailable', false], 503 => ['unavailable', false]];
 
-    public function test_router_records_real_usage_for_a_successful_call(): void
-    {
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'hermes', 'priority' => 1]);
-        Http::fake(['*' => Http::response($this->success(11271, 5))]);
-        $user = $this->employee();
-
-        $out = $this->route($user);
-
-        $this->assertSame('pong', $out['result']['content']);
-        $row = UsageRecord::where('request_id', 'r1')->sole();
-        $this->assertSame('success', $row->status);
-        $this->assertSame([11271, 5], [$row->input_tokens, $row->output_tokens]);
-        $this->assertFalse((bool) $row->is_estimate);
-    }
-
-    public function test_rate_limit_fails_over_to_the_next_connection(): void
-    {
-        ProviderConnection::create(['name' => 'a', 'kind' => 'hermes', 'priority' => 1]);
-        ProviderConnection::create(['name' => 'b', 'kind' => 'hermes', 'priority' => 2]);
-        Http::fake(['*' => Http::sequence()->push($this->inBandFailure('HTTP 429'))->push($this->success())]);
-        $user = $this->employee();
-
-        $out = $this->route($user);
-
-        $this->assertSame('b', $out['connection']->name);
-        $this->assertSame(['failed', 'success'], UsageRecord::where('request_id', 'r1')->orderBy('id')->pluck('status')->all());
-    }
-
-    public function test_a_timeout_never_goes_to_a_second_connection(): void
-    {
-        ProviderConnection::create(['name' => 'a', 'kind' => 'hermes', 'priority' => 1]);
-        ProviderConnection::create(['name' => 'b', 'kind' => 'hermes', 'priority' => 2]);
-        Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out after 60000 milliseconds'));
-        $user = $this->employee();
-
-        $e = $this->category(fn () => $this->route($user));
-
-        $this->assertSame('timeout', $e->category);
-        $this->assertSame(1, UsageRecord::where('request_id', 'r1')->count());
-    }
-
-    public function test_one_bad_response_does_not_take_the_connection_out_of_service(): void
-    {
-        $c = ProviderConnection::create(['name' => 'a', 'kind' => 'hermes', 'priority' => 1, 'status' => 'available']);
-        Http::fake(['*' => Http::response('nonsense', 200)]);
-        $user = $this->employee();
-
-        try {
-            $this->route($user);
-        } catch (NoProviderAvailable) {
-            // the only connection gave one odd reply; the router reports it, but must not mark the connection down
+        $sequence = Http::sequence();
+        foreach (array_keys($cases) as $status) {
+            $sequence->pushStatus($status);
         }
-
-        $this->assertSame('available', $c->fresh()->status);
+        Http::fake(['*' => $sequence]);
+        foreach ($cases as $status => [$category, $ok]) {
+            $r = $this->hermes->ping();
+            $this->assertSame([$ok, $category, $status], [$r['ok'], $r['category'], $r['status']], "HTTP {$status}");
+            $this->assertStringNotContainsString('super-secret-key', json_encode($r));
+        }
+        Http::assertSent(fn ($req) => $req->hasHeader('Authorization', 'Bearer super-secret-key') && ! str_contains($req->url(), 'super-secret-key'));
     }
 
-    public function test_no_connection_means_no_provider_available(): void
+    public function test_hermes_connection_problems_become_categories_without_leaking_the_address(): void
     {
-        $this->expectException(NoProviderAvailable::class);
-        $this->route($this->employee());
+        config(['services.hermes.url' => 'https://secret-host.internal:8443', 'services.hermes.key' => 'k']);
+
+        Http::fake(['*' => Http::sequence()
+            ->pushFailedConnection('cURL error 28: Connection timed out for https://secret-host.internal:8443')
+            ->pushFailedConnection('cURL error 7: Failed to connect to secret-host.internal port 8443')]);
+        $timeout = $this->hermes->ping();
+        $down = $this->hermes->ping();
+
+        $this->assertSame('timeout', $timeout['category']);
+        $this->assertSame('unavailable', $down['category']);
+        $this->assertStringNotContainsString('secret-host', json_encode([$timeout, $down]));
     }
 }

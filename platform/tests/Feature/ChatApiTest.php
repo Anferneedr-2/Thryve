@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Conversation;
 use App\Models\Message;
-use App\Models\ProviderConnection;
 use App\Models\Role;
 use App\Models\UsageRecord;
 use App\Support\Settings;
@@ -24,7 +23,6 @@ class ChatApiTest extends TestCase
         $this->useDatabaseSessions();
         $this->seed(\Database\Seeders\RoleSeeder::class);
         config(['services.hermes.url' => 'http://hermes.test/p/bot', 'services.hermes.key' => 'k-1234567890123456']);
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
     }
 
     private function answer(string $text = 'Hello there', int $in = 100, int $out = 20): array
@@ -162,7 +160,6 @@ class ChatApiTest extends TestCase
         $this->assertNotNull($id);
         $this->assertSame(1, Message::where('conversation_id', $id)->count());
 
-        ProviderConnection::query()->update(['status' => 'available', 'unavailable_until' => null]);
         $this->device($cookie)->postJson("/api/conversations/{$id}/regenerate")->assertOk()->assertJsonPath('data.reply.content', 'Recovered');
         $this->assertSame(2, Message::where('conversation_id', $id)->count());
     }
@@ -170,7 +167,6 @@ class ChatApiTest extends TestCase
     public function test_a_timeout_says_it_may_still_finish_and_is_not_sent_twice(): void
     {
         Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out after 60000 milliseconds'));
-        ProviderConnection::create(['name' => 'backup', 'kind' => 'claude', 'priority' => 2]);
         [, $cookie] = $this->me();
 
         $this->say($cookie, 'long task')->assertStatus(502)->assertJsonPath('error.code', 'ai_failed');

@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Ai\AgentService;
-use App\Ai\ProviderRouter;
+use App\Ai\AgentRunner;
 use App\Http\Responses\Api;
 use App\Models\Agent;
 use App\Models\AgentCheck;
@@ -79,12 +79,12 @@ class AgentController extends Controller
         return Api::ok($this->present($a->fresh()));
     }
 
-    public function test(Request $request, int $id, ProviderRouter $router): JsonResponse
+    public function test(Request $request, int $id, AgentRunner $runner): JsonResponse
     {
         $a = $this->find($id);
         $d = $request->validate(['with_message' => ['nullable', 'boolean']]);
         $check = ($d['with_message'] ?? false)
-            ? $this->agents->testWithMessage($a, $request->user(), $router)
+            ? $this->agents->testWithMessage($a, $request->user(), $runner)
             : $this->agents->test($a, $request->user());
 
         return Api::ok(['check' => $this->presentCheck($check), 'agent' => $this->present($a->fresh())]);
@@ -166,6 +166,7 @@ class AgentController extends Controller
             'name' => [$required ? 'required' : 'string', 'string', 'min:1', 'max:100'],
             'base_url' => [$required ? 'required' : 'string', 'string', 'max:255', 'url:http,https'],
             'profile' => ['nullable', 'string', 'regex:/^[a-z0-9][a-z0-9_-]{0,63}$/'],
+            'description' => ['nullable', 'string', 'max:200'],
         ];
     }
 
@@ -196,7 +197,7 @@ class AgentController extends Controller
     private function present(Agent $a): array
     {
         return [
-            'id' => $a->id, 'name' => $a->name, 'slug' => $a->slug, 'base_url' => $a->base_url, 'profile' => $a->profile, 'url' => $a->url(),
+            'id' => $a->id, 'name' => $a->name, 'slug' => $a->slug, 'base_url' => $a->base_url, 'profile' => $a->profile, 'description' => $a->description, 'url' => $a->url(),
             'is_enabled' => $a->is_enabled, 'is_default' => $a->is_default, 'status' => $a->status,
             'last_checked_at' => $a->last_checked_at?->toIso8601String(), 'last_latency_ms' => $a->last_latency_ms,
             'has_key' => $a->outbound_key !== null, 'key_fingerprint' => $a->outbound_fingerprint,

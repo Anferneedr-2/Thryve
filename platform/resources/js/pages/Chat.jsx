@@ -3,7 +3,7 @@ import { get, send, upload } from '../lib/api';
 import { errorText } from '../lib/util';
 import { Markdown } from '../lib/markdown';
 import { useToast } from '../components/ui/Feedback';
-import { Alert, EmptyState, Skeleton, Spinner } from '../components/ui/Feedback';
+import { Alert, EmptyState, Pill, Skeleton, Spinner } from '../components/ui/Feedback';
 import { Button, IconButton } from '../components/ui/Button';
 import { Dialog, ConfirmDialog, Menu } from '../components/ui/Overlay';
 import { TextField } from '../components/ui/Form';
@@ -66,6 +66,8 @@ export default function Chat() {
     const [sidebar, setSidebar] = useState(false);
     const [files, setFiles] = useState([]); // {key, id?, name, size, status: uploading|ready|error, error?}
     const [limits, setLimits] = useState({ max_count: 6, max_mb: 15, types: ['txt', 'md', 'csv', 'docx', 'xlsx'] });
+    const [agents, setAgents] = useState(null); // chatbots this person may use
+    const [pickedAgent, setPickedAgent] = useState(null);
     const picker = useRef(null);
     const abort = useRef(null);
     const endRef = useRef(null);
@@ -75,7 +77,11 @@ export default function Chat() {
     const loadUsage = useCallback(() => get('/usage/today').then(setUsage).catch(() => {}), []);
     const loadList = useCallback(() => get(`/conversations?archived=${showArchived ? 1 : 0}${query ? `&q=${encodeURIComponent(query)}` : ''}`).then(setList).catch(() => setList([])), [showArchived, query]);
 
-    useEffect(() => { loadUsage(); get('/attachments/limits').then(setLimits).catch(() => {}); }, [loadUsage]);
+    useEffect(() => {
+        loadUsage();
+        get('/attachments/limits').then(setLimits).catch(() => {});
+        get('/chat/agents').then((l) => { setAgents(l); setPickedAgent((l.find((a) => a.is_default) ?? l[0])?.id ?? null); }).catch(() => setAgents([]));
+    }, [loadUsage]);
 
     const attach = async (picked) => {
         let slots = limits.max_count - files.length;
@@ -149,7 +155,7 @@ export default function Chat() {
         const restore = () => setDraft(t);
         setDraft(''); setPendingText(t);
         // Files are cleared only after a successful send, so a failed send keeps both the text and the files.
-        const ok = await run((signal, ack) => post('/chat', 'POST', { message: t, conversation_id: current?.id, acknowledge_sensitive: ack || undefined, attachment_ids: ids }, signal), restore);
+        const ok = await run((signal, ack) => post('/chat', 'POST', { message: t, conversation_id: current?.id, agent_id: current ? undefined : (pickedAgent ?? undefined), acknowledge_sensitive: ack || undefined, attachment_ids: ids }, signal), restore);
         if (ok) setFiles((l) => l.filter((f) => !ids.includes(f.id)));
     };
 
@@ -189,6 +195,10 @@ export default function Chat() {
     const messages = current?.messages ?? [];
     const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === 'user';
     const exhausted = usage && usage.remaining <= 0;
+    const several = (agents?.length ?? 0) > 1;
+    // A conversation whose chatbot the person can no longer use stays readable but cannot continue.
+    const locked = !!(current?.agent && agents && !agents.some((a) => a.id === current.agent.id));
+    const blocked = exhausted || locked;
 
     return (
         <div className="chat-shell">
@@ -207,7 +217,7 @@ export default function Chat() {
                     {list?.length === 0 && <p className="chat-none">{query ? 'No conversations match.' : showArchived ? 'Nothing archived.' : 'No conversations yet.'}</p>}
                     {list?.map((c) => (
                         <div key={c.id} className={`chat-item ${current?.id === c.id ? 'on' : ''}`}>
-                            <button type="button" className="title" aria-current={current?.id === c.id ? 'true' : undefined} onClick={() => open(c.id)}>{c.title}</button>
+                            <button type="button" className="title" aria-current={current?.id === c.id ? 'true' : undefined} onClick={() => open(c.id)}>{c.title}{several && c.agent && <span className="agent">{c.agent.name}</span>}</button>
                             <Menu label={`Actions for ${c.title}`} items={[
                                 { label: 'Rename', icon: 'edit', onSelect: () => setRename({ c, title: c.title }) },
                                 { label: c.archived ? 'Unarchive' : 'Archive', icon: 'layers', onSelect: () => patchConv(c, { archived: !c.archived }, () => { if (current?.id === c.id && !c.archived) fresh(); }) },
@@ -222,15 +232,25 @@ export default function Chat() {
                 <div className="chat-bar">
                     <IconButton icon="panel" label="Conversations" className="chat-toggle" on={sidebar} onClick={() => setSidebar(!sidebar)} />
                     <h1 className="chat-title">{current?.title ?? 'New chat'}</h1>
+                    {current?.agent && <Pill tone="info">{current.agent.name}</Pill>}
                 </div>
 
                 <div className="chat-scroll" onScroll={onScroll} tabIndex={-1}>
                     {loadingConv && <Spinner label="Opening conversation" />}
                     {!loadingConv && !current && !pendingText && (
-                        <EmptyState icon="sparkle" title="How can I help today?">
+                        <EmptyState icon="sparkle" title={agents && agents.length === 0 ? 'No chatbot is available yet' : 'How can I help today?'}>
+                            {several && (
+                                <div className="chat-agents" role="radiogroup" aria-label="Choose a chatbot">
+                                    {agents.map((a) => (
+                                        <button key={a.id} type="button" role="radio" aria-checked={pickedAgent === a.id} className={pickedAgent === a.id ? 'on' : ''} onClick={() => setPickedAgent(a.id)}>
+                                            <strong>{a.name}</strong>{a.description && <span>{a.description}</span>}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                             <p>Ask for help with everyday office work: writing, summarizing, planning and explaining.</p>
                             <div className="chat-suggest">
-                                {SUGGESTIONS.map((s) => <button key={s} type="button" disabled={busy || exhausted} onClick={() => submit(s)}>{s}</button>)}
+                                {SUGGESTIONS.map((s) => <button key={s} type="button" disabled={busy || blocked} onClick={() => submit(s)}>{s}</button>)}
                             </div>
                         </EmptyState>
                     )}
@@ -285,6 +305,7 @@ export default function Chat() {
                             {current && lastIsUser && !busy && !['token_limit', 'stopped', 'sensitive_blocked'].includes(error.code) && <div><Button size="sm" variant="soft" icon="refresh" onClick={retry}>Try again</Button></div>}
                         </Alert>
                     )}
+                    {locked && <Alert tone="info" title="This chatbot is not available to you"><p>You can still read this conversation, but you cannot continue it. Ask an administrator if you need access.</p></Alert>}
                     <UsageMeter usage={usage} />
                     {files.length > 0 && (
                         <div className="chat-chips" aria-label="Attached files">
@@ -300,12 +321,12 @@ export default function Chat() {
                     )}
                     <div className="chat-composer">
                         <input ref={picker} type="file" multiple hidden accept={limits.types.map((t) => `.${t}`).join(',')} onChange={(e) => { attach([...e.target.files]); e.target.value = ''; }} />
-                        <IconButton icon="clip" label="Attach files" disabled={busy || exhausted} onClick={() => picker.current?.click()} />
-                        <textarea ref={box} className="sl-textarea" rows={2} aria-label="Message" placeholder={exhausted ? 'Your tokens for today are used up' : 'Message the assistant (Enter to send, Shift+Enter for a new line)'}
-                            value={draft} disabled={exhausted} maxLength={20000} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
+                        <IconButton icon="clip" label="Attach files" disabled={busy || blocked} onClick={() => picker.current?.click()} />
+                        <textarea ref={box} className="sl-textarea" rows={2} aria-label="Message" placeholder={locked ? 'You can no longer use this chatbot' : exhausted ? 'Your tokens for today are used up' : 'Message the assistant (Enter to send, Shift+Enter for a new line)'}
+                            value={draft} disabled={blocked} maxLength={20000} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} />
                         {busy
                             ? <Button variant="dark" icon="stop" onClick={stop}>Stop</Button>
-                            : <Button variant="primary" icon="up" disabled={!draft.trim() || exhausted || uploading} onClick={() => submit()}>Send</Button>}
+                            : <Button variant="primary" icon="up" disabled={!draft.trim() || blocked || uploading} onClick={() => submit()}>Send</Button>}
                     </div>
                     <p className="chat-note">AI answers can be wrong: check anything important. Do not enter passwords, card numbers or ID numbers.</p>
                 </div>

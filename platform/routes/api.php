@@ -10,7 +10,6 @@ use App\Http\Controllers\InstallController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PolicyController;
 use App\Http\Controllers\PriceController;
-use App\Http\Controllers\ProviderController;
 use App\Http\Controllers\SessionAdminController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SystemController;
@@ -57,6 +56,7 @@ Route::middleware(['web', 'installed'])->group(function () {
         Route::post('/notifications/{id}/read', [NotificationController::class, 'read'])->whereNumber('id');
 
         // Own conversations (private to the signed-in person).
+        Route::get('/chat/agents', [\App\Http\Controllers\ChatController::class, 'agents']);
         Route::get('/conversations', [\App\Http\Controllers\ChatController::class, 'index']);
         Route::post('/chat', [\App\Http\Controllers\ChatController::class, 'send'])->middleware('throttle:30,1');
         Route::get('/conversations/{id}', [\App\Http\Controllers\ChatController::class, 'show'])->whereNumber('id');
@@ -89,11 +89,12 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/users/{user}/deactivate', [UserController::class, 'deactivate']);
             Route::post('/users/{user}/reactivate', [UserController::class, 'reactivate']);
             Route::post('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
+            Route::get('/users/{user}/agents', [\App\Http\Controllers\AgentAccessController::class, 'show']);
+            Route::put('/users/{user}/agents', [\App\Http\Controllers\AgentAccessController::class, 'update']);
 
             // Providers and usage: Admins monitor (read-only); only Super Admin changes anything (group below).
             Route::get('/agents', [\App\Http\Controllers\AgentController::class, 'index']);
             Route::get('/agents/{id}/checks', [\App\Http\Controllers\AgentController::class, 'checks'])->whereNumber('id');
-            Route::get('/providers', [ProviderController::class, 'index']);
             Route::get('/prices', [PriceController::class, 'index']);
             Route::get('/usage/summary', [UsageController::class, 'summary']);
             Route::post('/users/{user}/token-grants', [UsageController::class, 'grant']);
@@ -125,13 +126,6 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::delete('/agents/{id}/rotate', [\App\Http\Controllers\AgentController::class, 'cancelRotation'])->whereNumber('id');
             Route::post('/agents/{id}/revoke', [\App\Http\Controllers\AgentController::class, 'revoke'])->whereNumber('id');
             Route::post('/agents/{id}/inbound-key', [\App\Http\Controllers\AgentController::class, 'inboundKey'])->whereNumber('id');
-            Route::post('/providers', [ProviderController::class, 'store']);
-            Route::post('/providers/reorder', [ProviderController::class, 'reorder']);
-            Route::patch('/providers/{provider}', [ProviderController::class, 'update']);
-            Route::post('/providers/{provider}/reauthenticate', [ProviderController::class, 'reauthenticate']);
-            Route::post('/providers/{provider}/check', [ProviderController::class, 'check'])->middleware('throttle:20,1');
-            Route::post('/providers/{provider}/quota', [ProviderController::class, 'quota']);
-            Route::delete('/providers/{provider}', [ProviderController::class, 'destroy']);
             Route::post('/prices', [PriceController::class, 'store']);
 
             Route::get('/system/health', [SystemController::class, 'health']);

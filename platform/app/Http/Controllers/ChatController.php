@@ -3,13 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Ai\ChatService;
-use App\Ai\NoProviderAvailable;
+use App\Ai\AgentUnavailable;
 use App\Ai\ProviderException;
 use App\Ai\TokenLimitReached;
 use App\Http\Responses\Api;
+use App\Models\Agent;
 use App\Models\Attachment;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\User;
 use App\Support\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,6 +26,13 @@ class ChatController extends Controller
         return Conversation::visible()->where('user_id', $request->user()->id)->findOrFail($id);
     }
 
+    /** The chatbots this person may start a chat with. Never any address, key or profile name. */
+    public function agents(Request $request): JsonResponse
+    {
+        return Api::ok(Agent::availableTo($request->user())->orderByDesc('is_default')->orderBy('name')->get()
+            ->map(fn ($a) => ['id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default])->values());
+    }
+
     public function index(Request $request): JsonResponse
     {
         $f = $request->validate(['q' => ['nullable', 'string', 'max:100'], 'archived' => ['nullable', 'boolean']]);
@@ -35,7 +44,7 @@ class ChatController extends Controller
                 ->orWhereExists(fn ($m) => $m->selectRaw('1')->from('messages')->whereColumn('messages.conversation_id', 'conversations.id')->whereNull('superseded_at')->where('content', 'like', $like)));
         }
 
-        return Api::ok($q->orderByDesc('last_message_at')->orderByDesc('id')->limit(100)->get()->map(fn ($c) => $this->summary($c)));
+        return Api::ok($q->with('agent')->orderByDesc('last_message_at')->orderByDesc('id')->limit(100)->get()->map(fn ($c) => $this->summary($c)));
     }
 
     public function show(Request $request, int $id): JsonResponse
@@ -51,6 +60,7 @@ class ChatController extends Controller
         $d = $request->validate([
             'message' => ['required', 'string', 'max:20000'],
             'conversation_id' => ['nullable', 'integer'],
+            'agent_id' => ['nullable', 'integer'],
             'acknowledge_sensitive' => ['nullable', 'boolean'],
             'attachment_ids' => ['nullable', 'array'],
             'attachment_ids.*' => ['integer'],
@@ -67,7 +77,19 @@ class ChatController extends Controller
             return $blocked;
         }
 
-        $c = isset($d['conversation_id']) ? $this->mine($request, $d['conversation_id']) : $this->chat->start($request->user(), $text);
+        $user = $request->user();
+        if (isset($d['conversation_id'])) {
+            $c = $this->mine($request, $d['conversation_id']);
+            if ($denied = $this->accessProblem($user, $c)) {
+                return $denied;
+            }
+        } else {
+            $agent = $this->pickAgent($user, $d['agent_id'] ?? null);
+            if ($agent instanceof JsonResponse) {
+                return $agent;
+            }
+            $c = $this->chat->start($user, $agent, $text);
+        }
         $this->chat->addUserMessage($c, $text, $files);
 
         return $this->respond($request, $c);
@@ -77,6 +99,9 @@ class ChatController extends Controller
     public function regenerate(Request $request, int $id): JsonResponse
     {
         $c = $this->mine($request, $id);
+        if ($denied = $this->accessProblem($request->user(), $c)) {
+            return $denied;
+        }
         $this->chat->supersedeLastAnswer($c);
         if (! $c->messages()->whereNull('superseded_at')->exists()) {
             return Api::error('nothing_to_answer', 'This conversation has no message to answer.', 409);
@@ -89,6 +114,9 @@ class ChatController extends Controller
     public function edit(Request $request, int $id, int $messageId): JsonResponse
     {
         $c = $this->mine($request, $id);
+        if ($denied = $this->accessProblem($request->user(), $c)) {
+            return $denied;
+        }
         $d = $request->validate(['message' => ['required', 'string', 'max:20000'], 'acknowledge_sensitive' => ['nullable', 'boolean']]);
         $original = $c->messages()->whereNull('superseded_at')->where('role', 'user')->findOrFail($messageId);
         $text = trim($d['message']);
@@ -137,6 +165,39 @@ class ChatController extends Controller
         return Api::ok(null);
     }
 
+    /** Which chatbot a new conversation uses. Null means "no agents are set up at all" (the old single-server setup). */
+    private function pickAgent(User $user, ?int $agentId): Agent|JsonResponse|null
+    {
+        if (! Agent::active()->exists()) {
+            return null;
+        }
+        $available = Agent::availableTo($user)->orderByDesc('is_default')->get();
+        if ($available->isEmpty()) {
+            return Api::error('no_chatbot', 'No chatbot is available to you yet. Ask an administrator.', 403);
+        }
+        if ($agentId === null) {
+            return $available->firstWhere('is_default', true) ?? ($available->count() === 1 ? $available->first()
+                : Api::error('agent_required', 'Choose which chatbot to use.', 422, ['agent_id' => ['Choose which chatbot to use.']]));
+        }
+
+        return $available->firstWhere('id', $agentId)
+            ?? Api::error('agent_not_available', 'You do not have access to that chatbot.', 403);
+    }
+
+    /** An existing conversation can only be continued with its own chatbot, and only while the person may use it. */
+    private function accessProblem(User $user, Conversation $c): ?JsonResponse
+    {
+        if ($c->agent_id === null) {
+            return null; // from before agents existed: it adopts the default agent on the next answer
+        }
+        $agent = Agent::active()->find($c->agent_id);
+        if ($agent && Agent::canUse($user, $agent)) {
+            return null;
+        }
+
+        return Api::error('agent_not_available', 'This chatbot is not available to you right now. You can still read this conversation.', 403);
+    }
+
     /** Files named in a send must be this person's own, unsent, and within the per-message limit. */
     private function files(Request $request, array $ids): \Illuminate\Support\Collection|JsonResponse
     {
@@ -177,8 +238,8 @@ class ChatController extends Controller
             $reply = $this->chat->answer($request->user(), $c);
         } catch (TokenLimitReached $e) {
             return Api::error('token_limit', $e->getMessage(), 429, $base);
-        } catch (NoProviderAvailable) {
-            return Api::error('ai_unavailable', 'The assistant is not available right now. Your message is saved: try again in a moment.', 503, $base);
+        } catch (AgentUnavailable) {
+            return Api::error('ai_unavailable', 'This chatbot is not available right now. Your message is saved: try again in a moment.', 503, $base);
         } catch (ProviderException $e) {
             $msg = match ($e->category) {
                 'timeout' => 'The assistant is taking too long. It may still finish: check this conversation again in a minute before sending the message twice.',
@@ -194,7 +255,8 @@ class ChatController extends Controller
 
     private function summary(Conversation $c): array
     {
-        return ['id' => $c->id, 'title' => $c->title, 'archived' => $c->archived_at !== null, 'last_message_at' => $c->last_message_at?->toIso8601String()];
+        return ['id' => $c->id, 'title' => $c->title, 'archived' => $c->archived_at !== null, 'last_message_at' => $c->last_message_at?->toIso8601String(),
+            'agent' => $c->agent ? ['id' => $c->agent->id, 'name' => $c->agent->name] : null];
     }
 
     private function message(Message $m): array

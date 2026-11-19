@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Ai\FileReader;
 use App\Models\Attachment;
-use App\Models\ProviderConnection;
 use App\Models\Role;
 use App\Support\Settings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -26,7 +25,6 @@ class AttachmentTest extends TestCase
         $this->seed(\Database\Seeders\RoleSeeder::class);
         Storage::fake('private');
         config(['services.hermes.url' => 'http://hermes.test/p/bot', 'services.hermes.key' => 'k-1234567890123456']);
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
     }
 
     private function me(): array

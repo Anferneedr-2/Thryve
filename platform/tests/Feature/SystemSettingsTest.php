@@ -257,7 +257,7 @@ class SystemSettingsTest extends TestCase
         $r = $this->device($c)->getJson('/api/system/health')->assertOk();
 
         $byKey = collect($r->json('data'))->keyBy('key');
-        $this->assertEqualsCanonicalizing(['database', 'hermes', 'providers', 'email', 'scheduler', 'queue', 'storage', 'backups'], $byKey->keys()->all());
+        $this->assertEqualsCanonicalizing(['database', 'hermes', 'agents', 'email', 'scheduler', 'queue', 'storage', 'backups'], $byKey->keys()->all());
         $this->assertSame('ok', $byKey['database']['status']);
         $this->assertSame('unknown', $byKey['hermes']['status'], 'Hermes is not configured in tests');
         $this->assertSame('unknown', $byKey['email']['status']);

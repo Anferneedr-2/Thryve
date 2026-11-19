@@ -45,7 +45,7 @@ class AgentService
             $in = self::newKey(self::IN_PREFIX);
             $first = ! Agent::active()->exists();
             $agent = Agent::create([
-                'name' => $d['name'], 'slug' => $this->slugFor($d['name']), 'base_url' => rtrim($d['base_url'], '/'), 'profile' => $d['profile'] ?? null,
+                'name' => $d['name'], 'slug' => $this->slugFor($d['name']), 'base_url' => rtrim($d['base_url'], '/'), 'profile' => $d['profile'] ?? null, 'description' => $d['description'] ?? null,
                 'is_default' => $first, 'created_by' => $actor->id,
                 'outbound_key' => $out, 'outbound_fingerprint' => self::fingerprint($out),
                 'inbound_key_hash' => hash('sha256', $in), 'inbound_fingerprint' => self::fingerprint($in),
@@ -76,15 +76,13 @@ class AgentService
     }
 
     /**
-     * The agent chat talks to: the default one, if it is enabled and has a key. Returns null when it cannot be used
-     * (and callers must then fail rather than fall back to old settings).
+     * What a request to this agent needs, or null when it cannot take requests (removed, disabled, or no key).
      *
      * @return array{agent_id: int, url: string, key: string, model: string}|null
      */
-    public function chatTarget(): ?array
+    public function targetFor(Agent $a): ?array
     {
-        $a = Agent::active()->where('is_default', true)->first();
-        if (! $a || ! $a->is_enabled || ! $a->outbound_key) {
+        if ($a->removed_at || ! $a->is_enabled || ! $a->outbound_key) {
             return null;
         }
 
@@ -105,19 +103,20 @@ class AgentService
         return $this->record($agent, $actor, $kind, $probe, $keyOverride === null);
     }
 
-    /** One real message through the router (so it is counted as background usage). Costs tokens. */
-    public function testWithMessage(Agent $agent, User $actor, ProviderRouter $router): AgentCheck
+    /** One real message through the ledger (counted as background usage). Costs tokens. */
+    public function testWithMessage(Agent $agent, User $actor, AgentRunner $runner): AgentCheck
     {
-        $target = ['agent_id' => $agent->id, 'url' => $agent->url(), 'key' => $agent->outbound_key, 'model' => $agent->profile ?: (string) config('services.hermes.model')];
+        $target = $this->targetFor($agent);
+        if ($target === null) {
+            return $this->record($agent, $actor, 'chat', ['category' => 'no_key', 'ok' => false, 'status' => null, 'latency_ms' => null], false);
+        }
         $t0 = hrtime(true);
         $tokens = null;
         try {
-            $out = $router->run(null, 'agent-test-'.Str::lower(Str::random(10)), $target['model'],
-                fn ($c) => $this->hermes->chat([['role' => 'user', 'content' => 'Reply with the single word: pong']], $c, $target), 'analysis');
+            $out = $runner->run(null, $agent, 'agent-test-'.Str::lower(Str::random(10)), $target['model'],
+                fn () => $this->hermes->chat([['role' => 'user', 'content' => 'Reply with the single word: pong']], $target), 'analysis');
             $tokens = $out['result']['input'] + $out['result']['output'];
             $res = ['category' => 'ok', 'ok' => true, 'status' => 200];
-        } catch (NoProviderAvailable) {
-            $res = ['category' => 'no_provider', 'ok' => false, 'status' => null];
         } catch (TokenLimitReached) {
             $res = ['category' => 'budget_used', 'ok' => false, 'status' => null];
         } catch (ProviderException $e) {

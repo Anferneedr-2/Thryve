@@ -22,7 +22,7 @@ class UsageController extends Controller
         return Api::ok($allowance->summary($request->user()));
     }
 
-    /** Admin and Super Admin: usage by provider over a range of Philippine business days. */
+    /** Admin and Super Admin: usage by agent over a range of Philippine business days. */
     public function summary(Request $request): JsonResponse
     {
         $f = $request->validate(['from' => ['nullable', 'date_format:Y-m-d'], 'to' => ['nullable', 'date_format:Y-m-d']]);
@@ -32,15 +32,16 @@ class UsageController extends Controller
             return Api::error('validation_failed', 'The start date is after the end date.', 422, ['from' => ['The start date is after the end date.']]);
         }
 
-        $rows = DB::table('usage_records as u')->join('provider_connections as p', 'p.id', '=', 'u.provider_connection_id')
+        // Usage from before agents existed has no agent: it is reported together as "Earlier usage".
+        $rows = DB::table('usage_records as u')->leftJoin('agents as a', 'a.id', '=', 'u.agent_id')
             ->whereBetween('u.work_date', [$from, $to])->where('u.status', '!=', 'pending')
-            ->groupBy('p.id', 'p.name', 'p.kind', 'u.currency')
-            ->selectRaw("p.id, p.name, p.kind, u.currency, COUNT(*) as requests, SUM(u.status = 'failed') as failures, SUM(u.is_estimate) as estimates,
+            ->groupBy('a.id', 'a.name', 'u.currency')
+            ->selectRaw("a.id, a.name, u.currency, COUNT(*) as requests, SUM(u.status = 'failed') as failures, SUM(u.is_estimate) as estimates,
                 SUM(u.input_tokens) as input_tokens, SUM(u.output_tokens) as output_tokens, SUM(u.cost) as cost, SUM(u.cost IS NULL) as unpriced, ROUND(AVG(u.latency_ms)) as avg_latency_ms")
-            ->orderBy('p.name')->get();
+            ->orderByRaw('a.name IS NULL, a.name')->get();
 
         return Api::ok($rows->map(fn ($r) => [
-            'provider_id' => $r->id, 'name' => $r->name, 'kind' => $r->kind, 'currency' => $r->currency, 'requests' => (int) $r->requests, 'failures' => (int) $r->failures,
+            'agent_id' => $r->id, 'name' => $r->name ?? 'Earlier usage (before agents)', 'currency' => $r->currency, 'requests' => (int) $r->requests, 'failures' => (int) $r->failures,
             'estimated_requests' => (int) $r->estimates, 'unpriced_requests' => (int) $r->unpriced, 'input_tokens' => (int) $r->input_tokens, 'output_tokens' => (int) $r->output_tokens,
             'cost' => $r->cost === null ? null : number_format((float) $r->cost, 6, '.', ''), 'avg_latency_ms' => $r->avg_latency_ms === null ? null : (int) $r->avg_latency_ms,
         ])->values(), ['from' => $from, 'to' => $to, 'timezone' => BusinessDay::timezone()]);

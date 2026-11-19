@@ -16,7 +16,7 @@ export function linksFor(user) {
             { id: '/team-attendance', label: 'Team', href: '/team-attendance' },
             { id: '/people', label: 'People', href: '/people' },
             { id: '/departments', label: 'Departments', href: '/departments' },
-            { id: '/providers', label: 'Providers', href: '/providers' },
+            { id: '/agents', label: 'AI agents', href: '/agents' },
         );
     }
     if (user.role === 'super_admin') {

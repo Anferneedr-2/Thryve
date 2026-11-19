@@ -14,7 +14,8 @@ export function generatePassword(length = 16) {
 
 // All validation messages from an ApiError as one list, or the plain message.
 export function errorText(err) {
-    const details = Object.values(err?.details ?? {}).flat();
+    // Only plain messages: some errors carry extra data (such as the conversation) in `details`.
+    const details = Object.values(err?.details ?? {}).flat().filter((v) => typeof v === 'string');
     return details.length ? details.join(' ') : err?.message ?? 'Something went wrong.';
 }
 

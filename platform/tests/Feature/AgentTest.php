@@ -6,7 +6,6 @@ use App\Ai\AgentService;
 use App\Models\Agent;
 use App\Models\AgentCheck;
 use App\Models\AuditEntry;
-use App\Models\ProviderConnection;
 use App\Models\Role;
 use App\Models\UsageRecord;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -217,7 +216,6 @@ class AgentTest extends TestCase
 
     public function test_the_one_message_test_goes_through_the_ledger_as_background_usage(): void
     {
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
         Http::fake(['*' => Http::response($this->completion())]);
         $sa = $this->sa();
         $made = $this->make($sa);
@@ -285,7 +283,6 @@ class AgentTest extends TestCase
     public function test_revoking_wipes_the_keys_and_blocks_both_directions(): void
     {
         Http::fake(['*' => Http::response($this->models())]);
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
         $sa = $this->sa();
         $made = $this->make($sa);
         $id = $made->json('data.id');
@@ -303,7 +300,7 @@ class AgentTest extends TestCase
         Http::assertNothingSent();
         // Chat must not fall back to anything else.
         $user = $this->cookieFor(Role::EMPLOYEE);
-        $this->device($user)->postJson('/api/chat', ['message' => 'hi'])->assertStatus(503);
+        $this->device($user)->postJson('/api/chat', ['message' => 'hi'])->assertStatus(403)->assertJsonPath('error.code', 'no_chatbot');
         Http::assertNothingSent();
     }
 
@@ -351,7 +348,7 @@ class AgentTest extends TestCase
         $this->assertNotNull(Agent::find($id)->inbound_last_seen_at);
         $this->device($sa)->getJson('/api/agents')->assertJsonPath('data.0.inbound_fingerprint', AgentService::fingerprint($in));
 
-        foreach (['/api/conversations', '/api/agents', '/api/users', '/api/auth/me', '/api/providers', '/api/settings'] as $url) {
+        foreach (['/api/conversations', '/api/agents', '/api/users', '/api/auth/me', '/api/prices', '/api/settings'] as $url) {
             $this->device(null)->withHeader('Authorization', "Bearer {$in}")->getJson($url)->assertStatus(401);
         }
         // The key it receives from us (outbound) is a different secret and does not work here.
@@ -395,7 +392,6 @@ class AgentTest extends TestCase
 
     public function test_chat_uses_the_default_agents_address_key_and_profile_and_records_it(): void
     {
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
         Http::fake(['*' => Http::response($this->completion('Hello!'))]);
         $sa = $this->sa();
         $this->make($sa, ['name' => 'Other', 'base_url' => 'https://other.example.com', 'profile' => 'other-bot']);
@@ -413,7 +409,6 @@ class AgentTest extends TestCase
     public function test_without_any_agent_the_old_env_settings_still_work(): void
     {
         config(['services.hermes.url' => 'http://hermes.test/p/bot', 'services.hermes.key' => 'k-1234567890123456']);
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
         Http::fake(['*' => Http::response($this->completion())]);
         $user = $this->cookieFor(Role::EMPLOYEE);
 
@@ -425,7 +420,6 @@ class AgentTest extends TestCase
 
     public function test_employees_never_see_agent_details_in_chat_or_usage(): void
     {
-        ProviderConnection::create(['name' => 'vps', 'kind' => 'chatgpt', 'priority' => 1]);
         Http::fake(['*' => Http::response($this->completion())]);
         $sa = $this->sa();
         $made = $this->make($sa);

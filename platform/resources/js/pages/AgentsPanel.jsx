@@ -56,7 +56,7 @@ function KeyReveal({ reveal, onClose }) {
 }
 
 function AgentForm({ agent, onClose, onSaved }) {
-    const [form, setForm] = useState({ name: agent?.name ?? '', base_url: agent?.base_url ?? '', profile: agent?.profile ?? '' });
+    const [form, setForm] = useState({ name: agent?.name ?? '', base_url: agent?.base_url ?? '', profile: agent?.profile ?? '', description: agent?.description ?? '' });
     const [errors, setErrors] = useState({});
     const [formError, setFormError] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -65,7 +65,7 @@ function AgentForm({ agent, onClose, onSaved }) {
         e.preventDefault();
         setBusy(true); setErrors({}); setFormError(null);
         try {
-            const body = { name: form.name.trim(), base_url: form.base_url.trim(), profile: form.profile.trim() || null };
+            const body = { name: form.name.trim(), base_url: form.base_url.trim(), profile: form.profile.trim() || null, description: form.description.trim() || null };
             const saved = await send(agent ? 'PATCH' : 'POST', agent ? `/agents/${agent.id}` : '/agents', body);
             onSaved(saved, !agent);
         } catch (err) {
@@ -81,6 +81,7 @@ function AgentForm({ agent, onClose, onSaved }) {
                 <TextField label="Name" value={form.name} onChange={set('name')} error={errors.name} placeholder="General Assistant" />
                 <TextField label="Server address" value={form.base_url} onChange={set('base_url')} error={errors.base_url} placeholder="https://ai.yourcompany.com" help="Where Hermes runs. Use https:// (http:// is allowed only on this computer)." />
                 <TextField label="Profile name" value={form.profile} onChange={set('profile')} error={errors.profile} placeholder="thryve-bot" help="The Hermes profile this agent uses. Leave empty if the server serves one agent at its address." />
+                <TextField label="Description for employees (optional)" value={form.description} onChange={set('description')} error={errors.description} maxLength={200} placeholder="Helps with everyday writing and questions" help="Shown when someone picks this chatbot." />
                 {agent && <p className="sl-help">Changing the address or profile resets the status until you test again.</p>}
             </form>
         </Dialog>
@@ -113,6 +114,7 @@ function AgentCard({ a, canManage, busyId, run, ask, edit, history }) {
                 <div className="grid gap-1">
                     <h5 className="flex flex-wrap items-center gap-2">{a.name}{a.is_default && <Pill tone="info">Default</Pill>}{!a.is_enabled && <Pill>Disabled</Pill>}</h5>
                     <span className="sl-help" style={{ overflowWrap: 'anywhere' }}>{a.url}</span>
+                    {a.description && <span className="sl-help">{a.description}</span>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <Pill tone={tone}>{label}</Pill>
@@ -216,7 +218,7 @@ export default function AgentsPanel({ canManage }) {
             {result && <Alert tone={result.ok ? 'success' : 'danger'} title={result.ok ? 'Test passed' : 'Test failed'}><p role="status">{result.text}</p></Alert>}
             {agents.length === 0 ? (
                 <EmptyState icon="chip" title="No agents yet" action={canManage && <Button variant="primary" onClick={() => setForm({})}>Add the first agent</Button>}>
-                    <p>Until an agent is added, chat uses the server address from the install settings.</p>
+                    <p>Until an agent is added, chat uses the server address from the install settings. Every agent you add becomes a chatbot: the default one is open to everyone, and you choose who gets the others on each person's page under People.</p>
                 </EmptyState>
             ) : (
                 <div className="grid gap-4">

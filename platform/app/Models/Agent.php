@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Agent extends Model
 {
@@ -37,5 +39,30 @@ class Agent extends Model
         $profile ??= $this->profile;
 
         return rtrim($this->base_url, '/').($profile ? "/p/{$profile}" : '');
+    }
+
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class)->withPivot('granted_by', 'created_at');
+    }
+
+    /**
+     * Chatbots this person may start or continue: enabled agents that have a key. Admins and Super Admins get all of
+     * them; everyone else gets the default agent plus the agents assigned to them one by one.
+     */
+    public static function availableTo(User $user)
+    {
+        $q = static::active()->where('is_enabled', true)->whereNotNull('outbound_key');
+        if (! $user->hasRole(Role::ADMIN, Role::SUPER_ADMIN)) {
+            $q->where(fn ($w) => $w->where('is_default', true)
+                ->orWhereIn('id', DB::table('agent_user')->where('user_id', $user->id)->select('agent_id')));
+        }
+
+        return $q;
+    }
+
+    public static function canUse(User $user, Agent $agent): bool
+    {
+        return static::availableTo($user)->whereKey($agent->id)->exists();
     }
 }

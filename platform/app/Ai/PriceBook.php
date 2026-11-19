@@ -9,16 +9,16 @@ use Carbon\CarbonInterface;
 /** The price list. Entries are only ever added, so a past request keeps the price it was charged at. */
 class PriceBook
 {
-    public function lookup(string $kind, string $model, ?CarbonInterface $at = null): ?PriceEntry
+    public function lookup(string $model, ?CarbonInterface $at = null): ?PriceEntry
     {
-        return PriceEntry::where('kind', $kind)->where('model', $model)->where('effective_from', '<=', ($at ?? now())->utc())
+        return PriceEntry::where('model', $model)->where('effective_from', '<=', ($at ?? now())->utc())
             ->orderByDesc('effective_from')->orderByDesc('id')->first();
     }
 
     /** @return array{cost: string, currency: string, snapshot: array}|null null when no price is known */
-    public function cost(string $kind, string $model, int $input, int $output, ?CarbonInterface $at = null): ?array
+    public function cost(string $model, int $input, int $output, ?CarbonInterface $at = null): ?array
     {
-        $p = $this->lookup($kind, $model, $at);
+        $p = $this->lookup($model, $at);
         if (! $p) {
             return null;
         }
@@ -31,8 +31,8 @@ class PriceBook
         ];
     }
 
-    public function add(string $kind, string $model, string $in, string $out, string $currency, CarbonInterface $effectiveFrom, ?User $by): PriceEntry
+    public function add(string $model, string $in, string $out, string $currency, CarbonInterface $effectiveFrom, ?User $by): PriceEntry
     {
-        return PriceEntry::create(['kind' => $kind, 'model' => $model, 'input_per_million' => $in, 'output_per_million' => $out, 'currency' => strtoupper($currency), 'effective_from' => $effectiveFrom->utc(), 'created_by' => $by?->id]);
+        return PriceEntry::create(['kind' => 'agent', 'model' => $model, 'input_per_million' => $in, 'output_per_million' => $out, 'currency' => strtoupper($currency), 'effective_from' => $effectiveFrom->utc(), 'created_by' => $by?->id]);
     }
 }

@@ -20,7 +20,7 @@ class HealthChecker
         return [
             $this->check('database', 'Database', fn () => $this->database()),
             $this->check('hermes', 'Hermes (AI service)', fn () => $this->hermes()),
-            $this->check('providers', 'AI providers', fn () => $this->providers()),
+            $this->check('agents', 'AI agents', fn () => $this->agentStatus()),
             $this->check('email', 'Email (SMTP)', fn () => $this->email()),
             $this->check('scheduler', 'Scheduler (cron)', fn () => $this->scheduler()),
             $this->check('queue', 'Background jobs', fn () => $this->queue()),
@@ -64,18 +64,23 @@ class HealthChecker
         return ['ok', "The server answered (HTTP {$status})."];
     }
 
-    private function providers(): array
+    /** From the last manual test of each enabled agent (nothing is called here). */
+    private function agentStatus(): array
     {
-        $all = \App\Models\ProviderConnection::active()->where('is_enabled', true)->get();
+        $all = \App\Models\Agent::active()->where('is_enabled', true)->get();
         if ($all->isEmpty()) {
-            return ['unknown', 'No AI provider is connected yet.'];
+            return ['unknown', 'No AI agent is connected yet.'];
         }
-        $good = $all->filter(fn ($c) => ! in_array($c->status, ['reauth_required', 'quota_exhausted'], true) && ! ($c->unavailable_until && $c->unavailable_until->isFuture()))->count();
-        if ($good === 0) {
-            return ['fail', 'None of the connected providers can take requests right now.'];
+        $bad = $all->filter(fn ($a) => in_array($a->status, ['key_rejected', 'profile_missing', 'unreachable', 'revoked'], true));
+        if ($bad->count() === $all->count()) {
+            return ['fail', 'No agent passed its last test.'];
         }
+        if ($bad->isNotEmpty()) {
+            return ['warn', "{$bad->count()} of {$all->count()} agents failed their last test."];
+        }
+        $untested = $all->where('status', 'never_tested')->count();
 
-        return $good < $all->count() ? ['warn', "{$good} of {$all->count()} providers can take requests."] : ['ok', "{$good} provider(s) ready."];
+        return $untested === $all->count() ? ['unknown', 'Agents have not been tested yet.'] : ['ok', ($all->count() - $untested).' of '.$all->count().' agent(s) passed their last test.'];
     }
 
     private function email(): array

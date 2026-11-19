@@ -16,9 +16,9 @@ class UsageRecord extends Model
         return ['is_estimate' => 'boolean', 'price_snapshot' => 'array', 'work_date' => 'date:Y-m-d', 'created_at' => 'datetime', 'cost' => 'decimal:6'];
     }
 
-    public function connection(): BelongsTo
+    public function agent(): BelongsTo
     {
-        return $this->belongsTo(ProviderConnection::class, 'provider_connection_id');
+        return $this->belongsTo(Agent::class);
     }
 
     public function user(): BelongsTo

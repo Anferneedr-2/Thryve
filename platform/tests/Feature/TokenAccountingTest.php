@@ -7,7 +7,6 @@ use App\Ai\Ledger;
 use App\Ai\PriceBook;
 use App\Ai\TokenLimitReached;
 use App\Models\Notification;
-use App\Models\ProviderConnection;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\TokenGrant;
@@ -44,13 +43,14 @@ class TokenAccountingTest extends TestCase
         return User::factory()->role($role)->create($attrs);
     }
 
-    private function conn(string $kind = 'claude', int $priority = 10): ProviderConnection
+    /** Usage rows no longer belong to a provider connection; the agent id is optional in these ledger tests. */
+    private function conn(): ?int
     {
-        return ProviderConnection::create(['name' => "{$kind}-{$priority}-".++$this->n, 'kind' => $kind, 'priority' => $priority]);
+        return null;
     }
 
     /** Open and close one attempt in a single step. */
-    private function spend(User $u, int $in, int $out, string $status = 'success', ?ProviderConnection $c = null, string $model = 'm1', bool $estimate = false): UsageRecord
+    private function spend(User $u, int $in, int $out, string $status = 'success', $c = null, string $model = 'm1', bool $estimate = false): UsageRecord
     {
         $r = $this->ledger->begin($u, $c ?? $this->conn(), 'req-'.++$this->n, 1, $model);
 
@@ -66,7 +66,7 @@ class TokenAccountingTest extends TestCase
 
     public function test_cost_uses_exact_decimals_and_keeps_the_price_it_was_charged_at(): void
     {
-        $this->prices->add('claude', 'm1', '3.0000', '15.0000', 'usd', now()->subDay(), null);
+        $this->prices->add('m1', '3.0000', '15.0000', 'usd', now()->subDay(), null);
         $u = $this->user();
 
         $r = $this->spend($u, 1000, 500);
@@ -79,12 +79,12 @@ class TokenAccountingTest extends TestCase
 
     public function test_changing_a_price_never_rewrites_past_costs(): void
     {
-        $this->prices->add('claude', 'm1', '3.0000', '15.0000', 'USD', now()->subDays(2), null);
+        $this->prices->add('m1', '3.0000', '15.0000', 'USD', now()->subDays(2), null);
         $u = $this->user();
         $this->setLimit($u, 10_000_000);
         $old = $this->spend($u, 1_000_000, 0);
 
-        $this->prices->add('claude', 'm1', '6.0000', '30.0000', 'USD', now()->subMinute(), null);
+        $this->prices->add('m1', '6.0000', '30.0000', 'USD', now()->subMinute(), null);
         $new = $this->spend($u, 1_000_000, 0);
 
         $this->assertSame('3.000000', (string) $old->fresh()->cost, 'the earlier request keeps its price');
@@ -92,17 +92,15 @@ class TokenAccountingTest extends TestCase
         $this->assertSame(2, \App\Models\PriceEntry::count(), 'prices are only ever added');
     }
 
-    public function test_the_price_is_chosen_by_date_and_by_model_and_kind(): void
+    public function test_the_price_is_chosen_by_date_and_by_model(): void
     {
-        $this->prices->add('claude', 'm1', '1.0000', '1.0000', 'USD', now()->subDays(10), null);
-        $this->prices->add('claude', 'm1', '9.0000', '9.0000', 'USD', now()->addDays(10), null); // not in force yet
-        $this->prices->add('chatgpt', 'm1', '5.0000', '5.0000', 'USD', now()->subDays(10), null);
+        $this->prices->add('m1', '1.0000', '1.0000', 'USD', now()->subDays(10), null);
+        $this->prices->add('m1', '9.0000', '9.0000', 'USD', now()->addDays(10), null); // not in force yet
 
-        $this->assertSame('1.0000', (string) $this->prices->lookup('claude', 'm1')->input_per_million);
-        $this->assertSame('9.0000', (string) $this->prices->lookup('claude', 'm1', now()->addDays(11))->input_per_million);
-        $this->assertSame('5.0000', (string) $this->prices->lookup('chatgpt', 'm1')->input_per_million);
-        $this->assertNull($this->prices->lookup('claude', 'other-model'));
-        $this->assertNull($this->prices->lookup('claude', 'm1', now()->subDays(30)), 'no price existed back then');
+        $this->assertSame('1.0000', (string) $this->prices->lookup('m1')->input_per_million);
+        $this->assertSame('9.0000', (string) $this->prices->lookup('m1', now()->addDays(11))->input_per_million);
+        $this->assertNull($this->prices->lookup('other-model'));
+        $this->assertNull($this->prices->lookup('m1', now()->subDays(30)), 'no price existed back then');
     }
 
     public function test_an_unpriced_model_still_counts_tokens_but_has_no_invented_cost(): void

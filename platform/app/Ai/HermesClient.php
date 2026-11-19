@@ -115,20 +115,14 @@ class HermesClient
      *
      * @throws ProviderException
      */
-    public function chat(array $messages, ?\App\Models\ProviderConnection $connection = null, ?array $target = null): array
+    public function chat(array $messages, ?array $target = null): array
     {
-        // An explicit target (agent test) wins; else the default agent; with no agents at all, the old .env settings.
-        $agents = app(AgentService::class);
-        $target ??= $agents->chatTarget();
-        if ($target === null && $agents->any()) {
-            throw new ProviderException('unavailable', retryable: true); // agents exist but none can be used: do not fall back to old settings
-        }
-        if ($target === null && ! $this->configured()) {
+        // The caller names the agent to talk to. With no agent at all, the old .env settings still work.
+        if ($target === null && (app(AgentService::class)->any() || ! $this->configured())) {
             throw new ProviderException('unavailable', retryable: true);
         }
 
-        // An agent's own key always wins; a connection's saved key only applies in the old single-server setup.
-        $key = $target['key'] ?? (($connection?->credentials ?: null) ?? config('services.hermes.key'));
+        $key = $target['key'] ?? config('services.hermes.key');
         $url = rtrim($target['url'] ?? (string) config('services.hermes.url'), '/').'/v1/chat/completions';
         $model = $target['model'] ?? config('services.hermes.model');
 
