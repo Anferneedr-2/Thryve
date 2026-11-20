@@ -234,6 +234,38 @@ class ChatTransferTest extends TestCase
         $this->assertSame(0, Agent::count());
     }
 
+    public function test_a_chatbot_that_was_removed_here_is_brought_back_instead_of_made_twice(): void
+    {
+        $this->oldDevice();
+        $file = $this->exportToFile();
+        $this->newDevice();
+        // The other device once had this chatbot and removed it: the row stays, hidden, and still owns the short name.
+        $old = $this->agent(['name' => 'My old local name', 'base_url' => 'http://127.0.0.1:8642', 'outbound_key' => null, 'outbound_fingerprint' => null,
+            'is_enabled' => false, 'is_default' => false, 'removed_at' => now()->subDay()]);
+        $bundle = json_decode(file_get_contents($file), true);
+
+        // A dry run says what would happen and changes nothing.
+        $dry = ChatTransfer::import($bundle, true);
+        $this->assertStringContainsString('would be brought back', $dry['agent']);
+        $this->assertNotNull($old->refresh()->removed_at);
+
+        $report = ChatTransfer::import($bundle);
+
+        $this->assertSame(3, $report['imported']);
+        $this->assertStringContainsString('brought back', $report['agent']);
+        $this->assertSame(1, Agent::where('slug', 'general-ai-assistant')->count(), 'no second chatbot, no database error');
+        $old->refresh();
+        $this->assertNull($old->removed_at);
+        $this->assertTrue((bool) $old->is_enabled);
+        $this->assertSame('My old local name', $old->name, 'its own settings are kept');
+        $this->assertSame('http://127.0.0.1:8642', $old->base_url);
+        $this->assertNull($old->outbound_key, 'still no key until one is created or imported');
+        $this->assertSame(3, DB::table('conversations')->where('agent_id', $old->id)->count());
+
+        // And running it again adds nothing.
+        $this->assertSame(0, ChatTransfer::import($bundle)['imported']);
+    }
+
     public function test_an_existing_chatbot_with_the_same_name_is_reused_and_left_untouched(): void
     {
         $this->oldDevice();

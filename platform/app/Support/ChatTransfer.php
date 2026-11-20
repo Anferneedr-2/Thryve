@@ -85,6 +85,8 @@ final class ChatTransfer
         // The chatbot is only made when there is at least one conversation to put in it, so a machine where nobody in the file
         // exists yet (a fresh install running its migrations) is left exactly as it was.
         $agent = Agent::active()->where('slug', $bundle['agent']['slug'])->first();
+        // A chatbot that was removed here keeps its name, so a new one cannot be made under it: bring that one back instead.
+        $removed = $agent ? null : Agent::whereNotNull('removed_at')->where('slug', $bundle['agent']['slug'])->first();
         if (! $agent) {
             $report['agent'] = 'not here, and nothing to import yet so none was made';
         }
@@ -96,7 +98,7 @@ final class ChatTransfer
 
                 continue;
             }
-            if ($agent && self::exists($agent->id, $userId, $c)) {
+            if (($agent ?? $removed) && self::exists(($agent ?? $removed)->id, $userId, $c)) {
                 $report['duplicates']++;
 
                 continue;
@@ -111,16 +113,27 @@ final class ChatTransfer
             if ($dryRun) {
                 continue;
             }
-            if (! $agent) {
+            if (! $agent && $removed) {
+                // Its settings stay as they were here; its keys were wiped when it was removed, so it still needs a key.
+                $removed->update(['removed_at' => null, 'is_enabled' => true]);
+                $agent = $removed;
+                $report['agent'] = 'brought back (it had been removed here; it has no access key until you create or import one)';
+            } elseif (! $agent) {
                 // No keys are copied. The chatbot exists so the chats have somewhere to live; it cannot answer until keys are made here.
                 $a = $bundle['agent'];
-                $agent = Agent::create(['name' => $a['name'], 'slug' => $a['slug'], 'base_url' => $a['base_url'], 'profile' => $a['profile'] ?? null, 'description' => $a['description'] ?? null, 'is_default' => false, 'is_enabled' => true]);
+                try {
+                    $agent = Agent::create(['name' => $a['name'], 'slug' => $a['slug'], 'base_url' => $a['base_url'], 'profile' => $a['profile'] ?? null, 'description' => $a['description'] ?? null, 'is_default' => false, 'is_enabled' => true]);
+                } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+                    throw new InvalidArgumentException("A chatbot named \"{$a['slug']}\" already exists here and could not be used. Check the Agents page, or ask for help.");
+                }
                 $report['agent'] = 'created (no access key yet: open Agents to create its keys)';
             }
             DB::transaction(fn () => self::insert($agent->id, $userId, $c));
         }
         if ($dryRun && ! $agent && $report['imported'] > 0) {
-            $report['agent'] = 'would be created (no access key yet: open Agents to create its keys)';
+            $report['agent'] = $removed
+                ? 'would be brought back (it had been removed here; it would have no access key until you create or import one)'
+                : 'would be created (no access key yet: open Agents to create its keys)';
         }
 
         return $report;
