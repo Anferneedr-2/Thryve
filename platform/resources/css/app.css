@@ -3,6 +3,7 @@
 @import './components.css';
 @import './shell.css';
 @import './chat.css';
+@import './login.css';
 
 @source '../../storage/framework/views/*.php';
 

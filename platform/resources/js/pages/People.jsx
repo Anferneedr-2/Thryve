@@ -211,7 +211,7 @@ export default function People() {
     return (
         <>
             <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-4xl">People</h1>
+                <p style={{ margin: 0 }}>Everyone who can sign in, their role and which departments they belong to.</p>
                 <Button variant="primary" icon="plus" className="ml-auto" onClick={() => setDialog({ type: 'create' })}>Add person</Button>
             </div>
 

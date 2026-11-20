@@ -22,6 +22,14 @@ class UpdateManager
 {
     public const STEPS = ['backup', 'verify', 'files', 'migrate', 'seed', 'finalize'];
 
+    /** A database-only update (code already deployed, for example by a GitHub Action) has no file step. */
+    public const DATABASE_STEPS = ['backup', 'verify', 'migrate', 'seed', 'finalize'];
+
+    private function isDatabase(array $state): bool
+    {
+        return ($state['kind'] ?? '') === 'database';
+    }
+
     public function __construct(private BackupService $backups, private Maintenance $maintenance, private UpdateSteps $steps) {}
 
     // ---- locations and state -------------------------------------------------------------------
@@ -101,6 +109,16 @@ class UpdateManager
         return array_values(array_diff($files, $migrator->getRepository()->getRan()));
     }
 
+    /** True when the deployed code has database changes that have not been applied yet. Cheap enough to ask on every request. */
+    public function databaseBehind(): bool
+    {
+        try {
+            return $this->pendingMigrations() !== [];
+        } catch (\Throwable) {
+            return false; // no database yet (installer) or unreadable: never lock people out because of this check
+        }
+    }
+
     public function status(): array
     {
         $state = $this->state();
@@ -110,7 +128,8 @@ class UpdateManager
             'version' => Version::current($this->base()),
             'php' => PHP_VERSION,
             'update' => $state,
-            'pending_migrations' => $this->pendingMigrations(),
+            'pending_migrations' => $pending = $this->pendingMigrations(),
+            'database_behind' => $pending !== [],
             'maintenance' => $this->maintenance->active(),
             'key_configured' => is_file(config('thryve.update.public_key')),
             'history' => $this->history(),
@@ -172,11 +191,22 @@ class UpdateManager
             ->map(fn ($f) => basename($f, '.php'))->values();
         $pending = array_values($newMigrations->diff($this->ranMigrations())->all());
 
-        return $this->save([
+        $staged = $this->save([
             'status' => 'staged', 'version' => $manifest['version'], 'from_version' => $installed, 'notes' => mb_substr((string) ($manifest['notes'] ?? ''), 0, 2000),
             'files' => $files, 'file_count' => count($files), 'pending_migrations' => $pending,
             'package_sha256' => hash_file('sha256', $zipPath), 'staged_at' => now()->toIso8601String(), 'step' => null, 'error' => null,
         ]);
+
+        // "Update available": tell the Super Admins a checked package is waiting for their approval (once per package).
+        try {
+            app(Notifier::class)->notify('system.update', "Update {$manifest['version']} is ready to review",
+                'A signed package passed its checks. Open Settings > Updates and approve it when you are ready.',
+                ['version' => $manifest['version']], 'update-staged:'.$staged['package_sha256']);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $staged;
     }
 
     private function ranMigrations(): array
@@ -245,6 +275,37 @@ class UpdateManager
         });
     }
 
+    /**
+     * New code is already on the server (deployed by a GitHub Action or similar) and the database is behind it. The Super
+     * Admin confirms; maintenance starts and the same safe sequence runs without the file step: backup, check the backup,
+     * migrate, seed, finish. Returns the bypass token for the Super Admin's browser.
+     */
+    public function approveDatabase(string $confirm): string
+    {
+        return $this->locked(function () use ($confirm) {
+            $state = $this->state();
+            if (in_array($state['status'], ['running', 'failed', 'staged'], true)) {
+                throw new UpdateException('busy', $state['status'] === 'staged' ? 'Discard the staged package first.' : 'Finish or roll back the current update first.', 409);
+            }
+            $pending = $this->pendingMigrations();
+            if (! $pending) {
+                throw new UpdateException('nothing_to_do', 'The database is already up to date.', 409);
+            }
+            if ($confirm !== 'update') {
+                throw new UpdateException('confirm_mismatch', 'Confirm to update the database.', 422);
+            }
+            $version = Version::current($this->base());
+            $token = $this->maintenance->on('Updating the database. This usually takes a few minutes.');
+            $this->save([
+                'status' => 'running', 'kind' => 'database', 'step' => 'backup', 'version' => $version, 'from_version' => $version,
+                'notes' => 'Database update: '.count($pending).' change(s).', 'files' => [], 'file_count' => 0, 'pending_migrations' => $pending,
+                'started_at' => now()->toIso8601String(), 'error' => null,
+            ]);
+
+            return $token;
+        });
+    }
+
     /** Run the next step. Returns the new state. */
     public function advance(): array
     {
@@ -275,15 +336,16 @@ class UpdateManager
 
     private function next(array $state, string $from): array
     {
-        $state['step'] = self::STEPS[array_search($from, self::STEPS, true) + 1] ?? null;
+        $steps = $this->isDatabase($state) ? self::DATABASE_STEPS : self::STEPS;
+        $state['step'] = $steps[array_search($from, $steps, true) + 1] ?? null;
 
         return $state;
     }
 
     private function stepBackup(array $state): array
     {
-        $snapshot = array_merge($state['files'], ['VERSION']);
-        $meta = $this->backups->create("Before update to {$state['version']}", 'update', $snapshot);
+        $snapshot = $this->isDatabase($state) ? [] : array_merge($state['files'], ['VERSION']);
+        $meta = $this->backups->create($this->isDatabase($state) ? 'Before a database update' : "Before update to {$state['version']}", 'update', $snapshot);
         $state['backup_id'] = $meta['id'];
 
         return $this->next($state, 'backup');
@@ -333,7 +395,9 @@ class UpdateManager
 
     private function stepFinalize(array $state): array
     {
-        file_put_contents($this->base().'/VERSION', $state['version']."\n");
+        if (! $this->isDatabase($state)) {
+            file_put_contents($this->base().'/VERSION', $state['version']."\n"); // a database update keeps the deployed version
+        }
         $this->steps->clearCaches();
         $this->maintenance->off();
         $this->backups->deleteDir($this->dir().'/staging');
@@ -341,8 +405,11 @@ class UpdateManager
         $state['status'] = 'done';
         $state['step'] = null;
         $state['finished_at'] = now()->toIso8601String();
-        $this->record(['version' => $state['version'], 'from' => $state['from_version'], 'result' => 'applied', 'backup_id' => $state['backup_id'], 'notes' => $state['notes'] ?? '']);
-        app(Notifier::class)->notify('system.update', "Updated to version {$state['version']}", 'The update finished successfully.', ['version' => $state['version']]);
+        $database = $this->isDatabase($state);
+        $this->record(['version' => $state['version'], 'from' => $state['from_version'], 'result' => 'applied', 'backup_id' => $state['backup_id'], 'kind' => $database ? 'database' : 'package',
+            'notes' => $database ? 'Database update: '.implode(', ', $state['pending_migrations'] ?? []) : ($state['notes'] ?? '')]);
+        app(Notifier::class)->notify('system.update', $database ? 'The database was updated' : "Updated to version {$state['version']}",
+            $database ? count($state['pending_migrations'] ?? []).' database change(s) were applied.' : 'The update finished successfully.', ['version' => $state['version']]);
 
         return $state;
     }
@@ -358,7 +425,7 @@ class UpdateManager
             }
             $this->maintenance->off();
             unset($state['backup_id']);
-            $state['status'] = 'staged';
+            $state['status'] = $this->isDatabase($state) ? 'idle' : 'staged';
             $state['step'] = null;
             $state['error'] = ['step' => $step, 'message' => "The update was cancelled before anything changed. {$message}"];
             $this->record(['version' => $state['version'], 'from' => $state['from_version'], 'result' => 'cancelled', 'notes' => $message]);
@@ -428,7 +495,7 @@ class UpdateManager
             $state['status'] = 'rolled_back';
             $state['error'] = null;
             $state['step'] = null;
-            $this->record(['version' => $state['version'], 'from' => $state['from_version'], 'result' => 'rolled_back', 'backup_id' => $state['backup_id'], 'notes' => 'Restored version '.$state['from_version']]);
+            $this->record(['version' => $state['version'], 'from' => $state['from_version'], 'result' => 'rolled_back', 'backup_id' => $state['backup_id'], 'notes' => $this->isDatabase($state) ? 'Restored the database from the backup' : 'Restored version '.$state['from_version']]);
             $this->save($state);
 
             // Written after the restore so it survives it.

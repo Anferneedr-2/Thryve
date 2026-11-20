@@ -34,6 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'current-session' => \App\Http\Middleware\EnsureCurrentSession::class,
             'role' => \App\Http\Middleware\EnsureRole::class,
             'policy' => \App\Http\Middleware\EnsurePolicyAcknowledged::class,
+            'db-current' => \App\Http\Middleware\HoldWhileDatabaseBehind::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

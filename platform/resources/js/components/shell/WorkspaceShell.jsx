@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../lib/auth';
 import { useRouter } from '../../lib/router';
-import { useBranding } from '../../lib/branding';
+import { LogoImg, useBranding } from '../../lib/branding';
 import { getTheme, toggleTheme } from '../../lib/theme';
 import { ROLE_LABEL } from '../../lib/roles';
 import { AttendanceHeartbeat } from '../../lib/heartbeat';
@@ -14,11 +14,11 @@ const initials = (name = '') => name.trim().split(/\s+/).slice(0, 2).map((p) => 
 
 // The company mark at the top of the rail: the uploaded logo when there is one, else the company's first letter.
 function BrandMark({ onClick }) {
-    const { company_name, has_logo, version } = useBranding();
+    const { company_name, has_logo } = useBranding();
     return (
         <a href="/chat" className="ws-mark" aria-label={`${company_name}: go to chat`} onClick={onClick}>
             {has_logo
-                ? <img src={`/branding/logo?v=${version}`} alt="" />
+                ? <LogoImg height={30} />
                 : <span aria-hidden="true">{company_name.trim()[0]?.toUpperCase() ?? 'T'}</span>}
         </a>
     );
@@ -84,7 +84,7 @@ export default function WorkspaceShell({ children }) {
     const main = useRef(null);
     const items = railItems(user);
     // Chat manages its own scrolling and panels; every other page scrolls inside the padded page body.
-    const flush = path === '/chat' || path.startsWith('/chat/');
+    const flush = path === '/chat' || path.startsWith('/chat/') || path === '/settings' || path.startsWith('/settings/');
 
     // The page no longer scrolls (the main area does), so reset its scroll when the screen changes.
     useEffect(() => { main.current?.scrollTo(0, 0); }, [path]);
@@ -95,7 +95,7 @@ export default function WorkspaceShell({ children }) {
                 <a className="ws-skip" href="#ws-main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
                 <Rail items={items} path={path} go={navigate} />
                 <main id="ws-main" ref={main} tabIndex={-1} className={`ws-main ${flush ? 'flush' : ''}`} aria-label={ROLE_LABEL[user.role]}>
-                    {flush ? children : <div className="ws-body">{children}</div>}
+                    {children}
                 </main>
                 <TabBar items={items} path={path} go={navigate} />
             </div>

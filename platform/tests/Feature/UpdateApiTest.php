@@ -118,6 +118,12 @@ class UpdateApiTest extends TestCase
         $this->assertSame('0.2.0', $r->json('data.update.version'));
         $this->assertSame(1, AuditEntry::where('action', 'system.update_staged')->count());
         $this->assertSame("0.1.0\n", $this->appFile('VERSION'));
+
+        // "Update available": the Super Admin is told a checked package is waiting, once per package.
+        $this->assertSame(1, Notification::where('type', 'system.update')->where('title', 'like', '%0.2.0 is ready to review%')->count());
+        $this->device($c)->deleteJson('/api/system/updates/staged')->assertOk();
+        $this->upload($c, $zip, $sig)->assertOk();
+        $this->assertSame(1, Notification::where('type', 'system.update')->where('title', 'like', '%ready to review%')->count(), 'the same package does not notify twice');
     }
 
     public function test_bad_uploads_are_rejected_with_a_clear_code(): void
@@ -192,7 +198,13 @@ class UpdateApiTest extends TestCase
         $this->asSuper($super, 'guess')->getJson('/api/system/updates')->assertStatus(503);
         // The health probe stays up.
         $this->device(null)->get('/up')->assertOk();
-        // The Super Admin carrying the token keeps working.
+        // The Super Admin carrying the token keeps working, but the attendance heartbeat writes nothing during maintenance
+        // (a row added between the backup and its check would make the backup look incomplete).
+        $rows = fn () => \Illuminate\Support\Facades\DB::table('attendance_days')->count() + \Illuminate\Support\Facades\DB::table('attendance_intervals')->count();
+        $before = $rows();
+        $this->asSuper($super, $token)->postJson('/api/attendance/heartbeat')->assertOk()->assertJsonPath('data.paused', true);
+        $this->asSuper($super, $token)->postJson('/api/attendance/close')->assertOk()->assertJsonPath('data.paused', true);
+        $this->assertSame($before, $rows());
         $this->asSuper($super, $token)->getJson('/api/system/updates')->assertOk()->assertJsonPath('data.maintenance', true);
         $this->asSuper($super, $token)->getJson('/api/auth/me')->assertOk();
         // A different person's session with the admin's token is also let through (the token is the key); it is bound to this run only.
@@ -306,6 +318,150 @@ class UpdateApiTest extends TestCase
 
         $this->device($c)->getJson('/api/system/backups/..%2F..%2Fetc/verify')->assertStatus(404);
         $this->device($c)->getJson('/api/system/backups/20260101-000000-abcdef/verify')->assertStatus(404);
+    }
+
+    // ---- database update after a code deploy (GitHub Action to cPanel, no terminal) -----------------------
+
+    private const MIGRATION = '2026_11_19_000010_create_notifications_tables';
+
+    /** Pretend the code on the server has one database change the database has not run yet. */
+    private function makeDatabaseBehind(): int
+    {
+        $batch = (int) \Illuminate\Support\Facades\DB::table('migrations')->where('migration', self::MIGRATION)->value('batch');
+        \Illuminate\Support\Facades\DB::table('migrations')->where('migration', self::MIGRATION)->delete();
+
+        return $batch;
+    }
+
+    public function test_when_code_is_deployed_ahead_of_the_database_everyone_but_the_super_admin_is_held_out(): void
+    {
+        $super = $this->makeUser(Role::SUPER_ADMIN, ['email' => 'super@example.com']);
+        [, $c] = $this->signIn($super);
+        $employee = $this->cookieFor(Role::EMPLOYEE);
+
+        $this->device($employee)->getJson('/api/auth/me')->assertOk();
+        $this->assertFalse($this->device($c)->getJson('/api/auth/me')->json('data.database_update_needed'), 'nothing to do when the database is current');
+
+        $batch = $this->makeDatabaseBehind();
+
+        $this->device($employee)->getJson('/api/auth/me')->assertStatus(503)->assertJsonPath('error.code', 'maintenance');
+        $this->device($employee)->getJson('/api/conversations')->assertStatus(503);
+        $this->device($employee)->postJson('/api/auth/logout')->assertOk(); // they can still sign out
+        $this->device($c)->getJson('/api/auth/me')->assertOk()->assertJsonPath('data.database_update_needed', true);
+        $status = $this->device($c)->getJson('/api/system/updates')->assertOk();
+        $this->assertTrue($status->json('data.database_behind'));
+        $this->assertSame([self::MIGRATION], $status->json('data.pending_migrations'));
+
+        \Illuminate\Support\Facades\DB::table('migrations')->insert(['migration' => self::MIGRATION, 'batch' => $batch]);
+        $this->device($c)->getJson('/api/auth/me')->assertOk()->assertJsonPath('data.database_update_needed', false);
+    }
+
+    public function test_the_database_update_backs_up_migrates_and_lifts_the_hold_without_touching_files(): void
+    {
+        $super = $this->makeUser(Role::SUPER_ADMIN, ['email' => 'super@example.com']);
+        [, $c] = $this->signIn($super);
+        $employee = $this->cookieFor(Role::EMPLOYEE);
+
+        // Nothing to do, and a missing confirmation, are both refused.
+        $this->asSuper($c)->postJson('/api/system/updates/database', ['confirm' => 'update'])->assertStatus(409)->assertJsonPath('error.code', 'nothing_to_do');
+        $batch = $this->makeDatabaseBehind();
+        $this->asSuper($c)->postJson('/api/system/updates/database', ['confirm' => 'yes please'])->assertStatus(422);
+        $this->assertFalse(app(Maintenance::class)->active());
+
+        $this->steps->onMigrate = fn () => \Illuminate\Support\Facades\DB::table('migrations')->insert(['migration' => self::MIGRATION, 'batch' => $batch]);
+        $r = $this->asSuper($c)->postJson('/api/system/updates/database', ['confirm' => 'update'])->assertOk();
+        $token = $r->getCookie(Maintenance::COOKIE, false)->getValue();
+        $this->assertSame('database', $r->json('data.update.kind'));
+        $this->assertTrue(app(Maintenance::class)->active());
+        $this->device($employee)->getJson('/api/auth/me')->assertStatus(503);
+
+        $steps = [];
+        for ($i = 0; $i < 8; $i++) {
+            $r = $this->asSuper($c, $token)->postJson('/api/system/updates/advance')->assertOk();
+            $steps[] = $r->json('data.update.step');
+            if ($r->json('data.update.status') === 'done') {
+                break;
+            }
+        }
+
+        $this->assertSame(['verify', 'migrate', 'seed', 'finalize', null], $steps, 'no file step: the code is already deployed');
+        $this->assertSame(['migrate', 'seed', 'caches'], $this->steps->calls);
+        $this->assertFalse(app(Maintenance::class)->active());
+        $this->assertSame("0.1.0\n", $this->appFile('VERSION'), 'a database update keeps the deployed version');
+        $this->assertSame(1, AuditEntry::where('action', 'system.database_update_approved')->count());
+        $status = $this->device($c)->getJson('/api/system/updates')->assertOk();
+        $this->assertFalse($status->json('data.database_behind'));
+        $this->assertSame('database', $status->json('data.history.0.kind'));
+        $this->assertSame('applied', $status->json('data.history.0.result'));
+        $this->assertSame('update', app(BackupService::class)->all()[0]['kind'], 'a backup was taken first');
+        $this->assertNotNull(Notification::where('user_id', $super->id)->where('title', 'The database was updated')->first());
+        $this->device($employee)->getJson('/api/auth/me')->assertOk(); // everyone is back
+    }
+
+    public function test_a_failed_database_update_stays_in_maintenance_until_rolled_back(): void
+    {
+        $super = $this->makeUser(Role::SUPER_ADMIN, ['email' => 'super@example.com']);
+        [, $c] = $this->signIn($super);
+        $this->makeDatabaseBehind();
+        $this->steps->failMigrate = new \RuntimeException('migration exploded');
+
+        $r = $this->asSuper($c)->postJson('/api/system/updates/database', ['confirm' => 'update'])->assertOk();
+        $token = $r->getCookie(Maintenance::COOKIE, false)->getValue();
+        for ($i = 0; $i < 8; $i++) {
+            $r = $this->asSuper($c, $token)->postJson('/api/system/updates/advance')->assertOk();
+            if ($r->json('data.update.status') === 'failed') {
+                break;
+            }
+        }
+        $this->assertSame('failed', $r->json('data.update.status'));
+        $this->assertSame('migrate', $r->json('data.update.failed_step'));
+        $this->assertTrue(app(Maintenance::class)->active(), 'the site stays in maintenance');
+        $this->asSuper($c, $token)->postJson('/api/system/updates/database', ['confirm' => 'update'])->assertStatus(409); // no second attempt on top
+
+        $r = $this->asSuper($c, $token)->postJson('/api/system/updates/rollback', ['confirm' => 'rollback'])->assertOk();
+        $this->assertSame('rolled_back', $r->json('data.update.status'));
+        $this->assertFalse(app(Maintenance::class)->active());
+    }
+
+    public function test_a_database_update_that_cannot_make_its_backup_changes_nothing(): void
+    {
+        $super = $this->makeUser(Role::SUPER_ADMIN, ['email' => 'super@example.com']);
+        [, $c] = $this->signIn($super);
+        $this->makeDatabaseBehind();
+        // A file where the backup folder should be: the backup cannot be created.
+        $this->rmTree($this->sbx.'/backups');
+        file_put_contents($this->sbx.'/backups', 'not a folder');
+
+        $r = $this->asSuper($c)->postJson('/api/system/updates/database', ['confirm' => 'update'])->assertOk();
+        $token = $r->getCookie(Maintenance::COOKIE, false)->getValue();
+        $r = $this->asSuper($c, $token)->postJson('/api/system/updates/advance')->assertOk();
+
+        $this->assertSame('idle', $r->json('data.update.status'), 'cancelled, not failed');
+        $this->assertStringContainsString('cancelled before anything changed', $r->json('data.update.error.message'));
+        $this->assertSame([], $this->steps->calls, 'the migration never ran');
+        $this->assertFalse(app(Maintenance::class)->active());
+    }
+
+    public function test_the_maintenance_page_shows_the_logo_and_the_brand_images_stay_reachable(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake(config('thryve.private_disk'));
+        \Illuminate\Support\Facades\Storage::disk(config('thryve.private_disk'))->put('branding/logo.png', UploadedFile::fake()->image('l.png', 80, 30)->getContent());
+        app(Maintenance::class)->on('Updating to version 0.2.0.');
+
+        // The two public images are plain files, so the notice can use them; everything else is still held back.
+        $this->device(null)->get('/branding/logo')->assertOk()->assertHeader('Content-Type', 'image/png');
+        $this->device(null)->get('/branding/logo_dark')->assertStatus(404); // none uploaded: not found, not "under maintenance"
+        $this->device(null)->getJson('/api/branding')->assertStatus(503);
+
+        $page = $this->device(null)->get('/')->assertStatus(503)->getContent();
+        $this->assertStringContainsString('<img class="logo lt nodark" src="/branding/logo"', $page, 'a normal logo with no dark one gets a white backing in dark mode');
+        $this->assertStringContainsString('We are updating', $page);
+
+        // With a dark logo as well, both are in the page and the colour scheme picks one.
+        \Illuminate\Support\Facades\Storage::disk(config('thryve.private_disk'))->put('branding/logo_dark.png', UploadedFile::fake()->image('d.png', 80, 30)->getContent());
+        $page = $this->device(null)->get('/')->assertStatus(503)->getContent();
+        $this->assertStringContainsString('<img class="logo lt " src="/branding/logo"', $page);
+        $this->assertStringContainsString('<img class="logo dk" src="/branding/logo_dark"', $page);
     }
 
     public function test_a_manual_backup_is_refused_while_an_update_runs(): void

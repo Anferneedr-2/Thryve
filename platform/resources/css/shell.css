@@ -23,15 +23,13 @@
 /* ---- main area ---- */
 .ws-main{min-width:0;min-height:0;overflow:auto;position:relative;outline:none}
 .ws-main.flush{overflow:hidden}
-.ws-body{max-width:1240px;margin:0 auto;padding:32px 40px 64px}
-.ws-body>*+*{margin-top:32px}
 
 /* Page header and body used by every non-chat page (P05A.02). */
 .ws-head{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--stage-b) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--sl-line);padding:0 40px}
 .ws-head-row{display:flex;align-items:center;gap:16px;min-height:80px}
 .ws-head h1{font-size:28px;line-height:1.2;margin:0}
 .ws-head-actions{margin-left:auto;display:flex;gap:10px;align-items:center}
-.ws-head .sl-tabs{margin:0 0 -1px}
+.ws-head .sl-tabs{margin:0 0 -1px;border-bottom:0;overflow-y:hidden}
 .ws-content{max-width:1240px;margin:0 auto;padding:32px 40px 64px;display:grid;gap:32px;align-content:start}
 .ws-content.wide{max-width:none}
 
@@ -54,7 +52,7 @@
   .ws-rail{display:none}
   .ws-tabs{display:flex;justify-content:space-around;align-items:stretch;background:var(--surface);border-top:1px solid var(--sl-line);padding:6px 4px calc(8px + env(safe-area-inset-bottom))}
   .ws-tabs .ws-it{width:auto;min-width:64px;flex:1;max-width:96px;padding:8px 0 6px;min-height:52px}
-  .ws-body,.ws-content{padding:20px 16px 32px}
+  .ws-content{padding:20px 16px 32px}
   .ws-head{padding:0 16px}
   .ws-head-row{min-height:64px}
   .ws-main.flush{padding:0}
@@ -63,3 +61,46 @@
 
 /* The bell sits in a 68 px rail button: keep its badge next to the icon, not at the far corner. */
 .ws-btn span.tnum{top:6px!important;right:14px!important}
+
+/* ---- pages with their own left drawer (Settings): same behaviour as the chat history panel ---- */
+.sx{--sx-left:320px;position:relative;display:grid;grid-template-columns:var(--sx-left) minmax(0,1fr);height:100%;min-height:0;overflow:hidden;background:var(--stage-b);transition:grid-template-columns .3s cubic-bezier(.22,1,.36,1)}
+.sx[data-left=closed]{--sx-left:0px}
+.sx-left{grid-column:1;min-width:0;min-height:0;overflow:hidden;background:var(--surface);border-right:1px solid var(--sl-line)}
+.sx[data-left=closed] .sx-left{border-right-color:transparent}
+.sx-left .in{width:320px;height:100%;overflow:auto;padding:22px 16px 24px;display:flex;flex-direction:column;gap:18px}
+.sx-group{display:grid;gap:8px}
+.sx .cw-ag{text-decoration:none}
+.sx-ic{width:40px;height:40px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--slate-100);color:var(--sl-muted)}
+.sx-ic .ic{width:20px;height:20px}
+.cw-ag.on .sx-ic{background:var(--surface);color:var(--blue-600)}
+.sx-main{grid-column:2;display:grid;grid-template-rows:80px minmax(0,1fr);min-width:0;min-height:0}
+.sx-hd{display:flex;align-items:center;gap:16px;padding:0 32px;background:var(--surface);border-bottom:1px solid var(--sl-line);min-width:0}
+.sx-title{min-width:0}
+.sx-title h1{font-size:24px;line-height:1.2;margin:0}
+.sx-title p{margin:2px 0 0;font-size:13.5px;color:var(--sl-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-body{overflow:auto;min-height:0;padding:32px 40px 64px}
+.sx-body>.in{max-width:820px;margin:0 auto;display:grid;gap:24px;align-content:start}
+.sx[data-lov=true]{--sx-left:0px}
+.sx[data-lov=true] .sx-left{position:absolute;z-index:30;top:0;bottom:0;left:0;width:min(340px,88vw);transform:translateX(-102%);transition:transform .3s cubic-bezier(.22,1,.36,1);box-shadow:var(--sh-lg);border-right-color:var(--sl-line)}
+.sx[data-lov=true] .sx-left .in{width:100%}
+.sx[data-lov=true][data-left=open] .sx-left{transform:none}
+.sx .cw-backdrop{z-index:25}
+@media (max-width:767px){
+  .sx-main{grid-template-rows:64px minmax(0,1fr)}
+  .sx-hd{padding:0 12px;gap:10px}
+  .sx-title h1{font-size:18px}
+  .sx-title p{display:none}
+  .sx-body{padding:20px 16px 32px}
+  .sx[data-lov=true] .sx-left{width:100%;box-shadow:none}
+  .sx .cw-backdrop{display:none}
+  .sx .cw-ag{min-height:64px}
+}
+@media (prefers-reduced-motion:reduce){.sx,.sx-left{transition:none!important}}
+
+/* ---- maintenance notice: covers everything while an update or restore runs ---- */
+.maint{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:24px;background:color-mix(in srgb,var(--stage-b) 94%,transparent);backdrop-filter:blur(6px)}
+.maint-card{width:min(100%,460px);display:grid;gap:12px;padding:28px;background:var(--surface);border:1px solid var(--sl-line);border-radius:24px;box-shadow:var(--sh-lg)}
+.maint-card h1{margin:0;font-size:26px;line-height:1.2}
+.maint-card p{margin:0}
+.maint-ic{width:52px;height:52px;border-radius:16px;background:var(--blue-100);color:var(--blue-600);display:grid;place-items:center}
+.maint-ic .ic{width:26px;height:26px}

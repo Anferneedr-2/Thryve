@@ -29,10 +29,9 @@ export default function Attendance() {
     return (
         <>
             <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-4xl">My attendance</h1>
+                <p style={{ margin: 0 }}>Time is recorded in Philippine time (Asia/Manila). Idle time is shown separately and is not counted as work.</p>
                 <Pill tone={tone}>{label} now</Pill>
             </div>
-            <p>Time is recorded in Philippine time (Asia/Manila). Idle time is shown separately and is not counted as work.</p>
 
             <div className="grid gap-4 sm:grid-cols-3">
                 <Card><Stat value={formatDuration(today?.active_seconds)} label="Active today" /></Card>

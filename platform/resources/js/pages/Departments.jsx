@@ -64,10 +64,9 @@ export default function Departments() {
     return (
         <>
             <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-4xl">Departments</h1>
+                <p style={{ margin: 0 }}>Departments group people and control access. They do not set token limits.</p>
                 <Button variant="primary" icon="plus" className="ml-auto" onClick={() => setEditing('new')}>Add department</Button>
             </div>
-            <p>Departments group people and control access. They do not set token limits.</p>
             {actionError && <Alert tone="danger" title="Could not delete">{actionError}</Alert>}
             {error ? <ErrorState onRetry={load}>{error.message}</ErrorState> : !rows ? <Skeleton lines={4} /> : rows.length === 0 ? (
                 <EmptyState icon="layers" title="No departments yet" action={<Button variant="soft" size="sm" onClick={() => setEditing('new')}>Add the first one</Button>}>Create departments, then assign people to them.</EmptyState>

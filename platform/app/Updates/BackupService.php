@@ -53,7 +53,7 @@ class BackupService
             $meta = [
                 'id' => $id, 'label' => $label, 'kind' => $kind, 'created_at' => now()->toIso8601String(),
                 'app_version' => Version::current(),
-                'db_sha256' => hash_file('sha256', $dir.'/db.sql'), 'db_bytes' => filesize($dir.'/db.sql'), 'tables' => $counts,
+                'db_sha256' => hash_file('sha256', $dir.'/db.sql'), 'db_bytes' => filesize($dir.'/db.sql'), 'tables' => $counts, 'full' => $tables === null,
                 'files_sha256' => null, 'files_count' => 0, 'files_bytes' => 0, 'created_files' => [], 'offsite' => 'none',
             ];
             if ($snapshotFiles || $snapshotDirs) {
@@ -127,6 +127,19 @@ class BackupService
             throw new RuntimeException('The database backup is missing or damaged.');
         }
         $pdo = DB::connection()->getPdo();
+
+        // A complete backup describes the whole database, so tables created since (for example by a migration that
+        // failed half way) are removed too; otherwise the restore would leave leftovers that block the next attempt.
+        // Backups limited to some tables never remove anything.
+        if ($meta['full'] ?? false) {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+            foreach ($pdo->query("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'")->fetchAll(PDO::FETCH_COLUMN) as $t) {
+                if (! array_key_exists($t, $meta['tables'])) {
+                    $pdo->exec('DROP TABLE IF EXISTS `'.str_replace('`', '``', $t).'`');
+                }
+            }
+            $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+        }
         foreach (explode(self::SEP, (string) file_get_contents($file)) as $stmt) {
             $stmt = trim($stmt);
             if ($stmt === '' || str_starts_with($stmt, '--')) {
@@ -284,19 +297,57 @@ class BackupService
         return collect($this->all())->firstWhere('kind', $kind);
     }
 
-    /** Remove scheduled backups older than the retention window. Update backups are kept until removed by an admin. */
+    /**
+     * Remove old backups: scheduled ones after `retention_days`, update backups after `update_retention_days`. The backup
+     * an unfinished or failed update still needs for its rollback is never removed. Off-server copies follow the same
+     * `retention_days`. @return int how many local backups were removed
+     */
     public function prune(): int
     {
-        $cutoff = now()->subDays((int) config('thryve.backups.retention_days'))->toIso8601String();
+        $scheduledCutoff = now()->subDays((int) config('thryve.backups.retention_days'))->toIso8601String();
+        $updateCutoff = now()->subDays((int) config('thryve.backups.update_retention_days'))->toIso8601String();
+        $keep = $this->neededByUpdate();
         $removed = 0;
         foreach ($this->all() as $m) {
-            if ($m['kind'] === 'scheduled' && $m['created_at'] < $cutoff) {
+            $cutoff = $m['kind'] === 'scheduled' ? $scheduledCutoff : $updateCutoff;
+            if ($m['created_at'] < $cutoff && ! in_array($m['id'], $keep, true)) {
                 $this->deleteDir($this->root().'/'.$m['id']);
                 $removed++;
             }
         }
+        $this->pruneOffsite();
 
         return $removed;
+    }
+
+    /** @return list<string> ids of backups a running or failed update still depends on */
+    private function neededByUpdate(): array
+    {
+        $f = rtrim((string) config('thryve.update.dir'), '/\\').'/state.json';
+        $state = is_file($f) ? json_decode((string) file_get_contents($f), true) : null;
+
+        return is_array($state) && in_array($state['status'] ?? '', ['running', 'failed'], true) && ! empty($state['backup_id']) ? [$state['backup_id']] : [];
+    }
+
+    /** Off-server copies older than the retention window. A failure here never fails the backup run. */
+    private function pruneOffsite(): void
+    {
+        $diskName = config('thryve.backups.offsite_disk');
+        if (! $diskName) {
+            return;
+        }
+        $cutoff = now()->subDays((int) config('thryve.backups.retention_days'))->format('Ymd-His');
+        try {
+            $disk = Storage::disk($diskName);
+            foreach ($disk->directories('thryve-backups') as $dir) {
+                $id = basename($dir);
+                if (preg_match('/^(\d{8}-\d{6})-[0-9a-f]{6}$/', $id, $m) && $m[1] < $cutoff) {
+                    $disk->deleteDirectory($dir);
+                }
+            }
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /** Copy a backup to the off-server disk, if one is configured. @return 'none'|'ok'|'failed' */
@@ -308,12 +359,17 @@ class BackupService
         }
         try {
             $disk = Storage::disk($diskName);
-            foreach (['meta.json', 'db.sql', 'files.zip'] as $name) {
-                $path = $this->root().'/'.$meta['id'].'/'.$name;
-                if (is_file($path)) {
-                    $disk->put('thryve-backups/'.$meta['id'].'/'.$name, fopen($path, 'rb'));
+            $dir = $this->root().'/'.$meta['id'];
+            // The data first, the description last: a copy that has its meta.json is a complete copy, and that meta.json
+            // already says the copy worked (so a restore from the off-server copy shows the right status).
+            foreach (['db.sql', 'files.zip'] as $name) {
+                if (is_file($dir.'/'.$name)) {
+                    $disk->put('thryve-backups/'.$meta['id'].'/'.$name, fopen($dir.'/'.$name, 'rb'));
                 }
             }
+            $meta['offsite'] = 'ok';
+            $this->writeMeta($dir, $meta);
+            $disk->put('thryve-backups/'.$meta['id'].'/meta.json', fopen($dir.'/meta.json', 'rb'));
             $status = 'ok';
         } catch (\Throwable $e) {
             report($e);

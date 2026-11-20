@@ -30,7 +30,7 @@ class ChatController extends Controller
     public function agents(Request $request): JsonResponse
     {
         return Api::ok(Agent::availableTo($request->user())->orderByDesc('is_default')->orderBy('name')->get()
-            ->map(fn ($a) => ['id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default])->values());
+            ->map(fn ($a) => ['id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default, 'avatar' => \App\Support\AgentAvatar::url($a->id)])->values());
     }
 
     public function index(Request $request): JsonResponse
@@ -256,7 +256,7 @@ class ChatController extends Controller
     private function summary(Conversation $c): array
     {
         return ['id' => $c->id, 'title' => $c->title, 'archived' => $c->archived_at !== null, 'last_message_at' => $c->last_message_at?->toIso8601String(),
-            'agent' => $c->agent ? ['id' => $c->agent->id, 'name' => $c->agent->name] : null];
+            'agent' => $c->agent ? ['id' => $c->agent->id, 'name' => $c->agent->name, 'avatar' => \App\Support\AgentAvatar::url($c->agent->id)] : null];
     }
 
     private function message(Message $m): array

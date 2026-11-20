@@ -4,23 +4,22 @@ import { Button } from '../components/ui/Button';
 import { TextField } from '../components/ui/Form';
 import { Alert, Pill, Skeleton, Spinner, ErrorState } from '../components/ui/Feedback';
 import Icon from '../components/Icon';
+import GuestFrame from '../components/GuestFrame';
 
 const STEPS = ['Welcome', 'Server check', 'Database', 'Hermes', 'Super Admin', 'Install'];
+const SETUP_POINTS = [['check', 'Check the server'], ['layers', 'Connect the database'], ['users', 'Create the Super Admin']];
 
 function Shell({ step, title, intro, children, footer }) {
     return (
-        <main className="mx-auto flex min-h-screen w-full max-w-[640px] flex-col justify-center gap-6 px-6 py-10">
-            <div className="flex items-center gap-3">
-                <span className="font-display text-2xl font-extrabold text-navy">Thryve</span>
-                <Pill tone="info">Step {step + 1} of {STEPS.length}</Pill>
-            </div>
-            <section className="sl-card" aria-labelledby="wiz-title">
-                <h1 id="wiz-title" className="text-3xl">{title}</h1>
-                {intro && <p>{intro}</p>}
+        <GuestFrame width={520} label="Installation" tagline={'Let\u2019s set up your workspace'} points={SETUP_POINTS}>
+            <div className="mb-3"><Pill tone="info">Step {step + 1} of {STEPS.length}</Pill></div>
+            <div className="grid gap-4" aria-labelledby="wiz-title">
+                <h1 id="wiz-title">{title}</h1>
+                {intro && <p className="lg-lead" style={{ margin: 0 }}>{intro}</p>}
                 {children}
                 {footer && <div key={step} className="sl-btn-row mt-2 justify-end">{footer}</div>}
-            </section>
-        </main>
+            </div>
+        </GuestFrame>
     );
 }
 

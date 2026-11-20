@@ -63,7 +63,11 @@ class AuthController extends Controller
 
     private function present(User $user): array
     {
-        return UserResource::make($user)->resolve() + ['policy_acknowledged' => $user->hasAcknowledgedPolicy()];
+        return UserResource::make($user)->resolve() + [
+            'policy_acknowledged' => $user->hasAcknowledgedPolicy(),
+            // New code was deployed and the database is behind it: the Super Admin is sent to the update screen.
+            'database_update_needed' => $user->hasRole('super_admin') && app(\App\Updates\UpdateManager::class)->databaseBehind(),
+        ];
     }
 
     public function logout(Request $request): JsonResponse

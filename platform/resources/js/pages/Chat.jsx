@@ -15,7 +15,8 @@ import Icon from '../components/Icon';
 import ChatPanel from '../components/chat/ChatPanel';
 import Messages from '../components/chat/Messages';
 import DetailsPanel from '../components/chat/DetailsPanel';
-import { SUGGESTIONS, extOf, firstName, fmt, hue, initial, sizeText } from '../components/chat/chatUtil';
+import { SUGGESTIONS, extOf, firstName, fmt, hue, sizeText } from '../components/chat/chatUtil';
+import AgentAvatar from '../components/chat/AgentAvatar';
 
 export default function Chat() {
     const toast = useToast();
@@ -26,6 +27,7 @@ export default function Chat() {
     // ---- side panels: columns on wide screens (remembered per browser), overlays on narrow ones -----------------------
     const narrowLeft = useMedia('(max-width: 1023px)');
     const narrowRight = useMedia('(max-width: 1279px)');
+    const phone = useMedia('(max-width: 767px)');
     const [leftSaved, , toggleLeftSaved] = usePanelState('chat-left', true);
     const [rightSaved, , toggleRightSaved] = usePanelState('chat-details', false);
     const [leftOv, setLeftOv] = useState(false);
@@ -35,6 +37,8 @@ export default function Chat() {
     const toggleLeft = () => (narrowLeft ? setLeftOv((v) => !v) : toggleLeftSaved());
     const toggleRight = () => (narrowRight ? setRightOv((v) => !v) : toggleRightSaved());
     const leftBtn = useRef(null);
+    // Phones: the chats panel is the home screen, so opening /chat with nothing selected starts on the list.
+    useEffect(() => { if (phone && routeId === null) setLeftOv(true); }, [phone]); // eslint-disable-line react-hooks/exhaustive-deps
     const rightBtn = useRef(null);
 
     // ---- data ----------------------------------------------------------------------------------------------------------
@@ -139,7 +143,15 @@ export default function Chat() {
     const onScroll = (e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
 
     // Every send, edit and retry goes through here. A failed send puts the text back so nothing typed is lost.
+    // The chat moves to the top of the list with a fresh time the moment the person sends, not only after the answer arrives.
+    const touchCurrent = () => setList((l) => {
+        if (!l || !current) return l;
+        const now = new Date().toISOString();
+        const hit = l.find((c) => c.id === current.id);
+        return hit ? [{ ...hit, last_message_at: now }, ...l.filter((c) => c.id !== current.id)] : l;
+    });
     const run = async (fn, restore) => {
+        touchCurrent();
         setBusy(true); setError(null);
         const ctl = new AbortController(); abort.current = ctl;
         try {
@@ -262,8 +274,8 @@ export default function Chat() {
 
             <section className="cw-main" aria-label="Conversation">
                 <header className="cw-hd">
-                    <button ref={leftBtn} type="button" className="cw-tgl" aria-label={leftOpen ? 'Hide chats' : 'Show chats'} aria-expanded={leftOpen} aria-controls="cw-left" onClick={toggleLeft}>
-                        <Icon name="panel" />
+                    <button ref={leftBtn} type="button" className="cw-tgl" aria-label={phone ? 'Back to chats' : leftOpen ? 'Hide chats' : 'Show chats'} aria-expanded={leftOpen} aria-controls="cw-left" onClick={toggleLeft}>
+                        {phone ? <Icon name="arrow" className="flip" /> : <Icon name="panel" />}
                     </button>
                     <h1>{current?.title ?? 'New chat'}</h1>
                     {agent && (headerSwitch ? (
@@ -283,7 +295,7 @@ export default function Chat() {
                     {loadingConv && <div className="p-8"><Spinner label="Opening conversation" /></div>}
                     {showWelcome && (
                         <div className="cw-welcome">
-                            {agent && <span className={`cw-av lg ${hue(agents, agent.id)}`} aria-hidden="true">{initial(agent.name)}</span>}
+                            {agent && <AgentAvatar agent={agent} agents={agents} size="lg" />}
                             <h2>{agent && several ? `Hi ${firstName(user.name)}, I'm ${agent.name}` : `Hi ${firstName(user.name)}, how can I help today?`}</h2>
                             <p>{agent?.description || 'Ask for help with everyday office work: writing, summarizing, planning and explaining.'}</p>
                             <div className="cw-suggest">
@@ -335,7 +347,7 @@ export default function Chat() {
                             </div>
                         )}
                         <textarea ref={box} rows={1} aria-label="Message" value={draft} disabled={blocked} maxLength={20000}
-                            placeholder={locked ? 'You can no longer use this assistant' : exhausted ? 'Your tokens for today are used up' : agent ? `Message ${agent.name}…` : 'Message the assistant…'}
+                            placeholder={locked ? 'You can no longer use this assistant' : exhausted ? 'Your tokens for today are used up' : phone ? 'Message…' : agent ? `Message ${agent.name}…` : 'Message the assistant…'}
                             onChange={(e) => { setDraft(e.target.value); grow(e.target); }} onKeyDown={onKey} />
                         <div className="tools">
                             <input ref={pickerRef} type="file" multiple hidden accept={limits.types.map((t) => `.${t}`).join(',')} onChange={(e) => { attach([...e.target.files]); e.target.value = ''; }} />

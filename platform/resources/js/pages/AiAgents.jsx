@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, get, send } from '../lib/api';
-import { useAuth } from '../lib/auth';
 import { addDays, formatDateTime, manilaToday } from '../lib/util';
-import { Table, Tabs } from '../components/ui/Layout';
+import { Table } from '../components/ui/Layout';
 import { Button } from '../components/ui/Button';
 import { TextField } from '../components/ui/Form';
-import { Alert, EmptyState, ErrorState, Pill, Skeleton, useToast } from '../components/ui/Feedback';
-import AgentsPanel from './AgentsPanel';
+import { EmptyState, ErrorState, Pill, Skeleton, useToast } from '../components/ui/Feedback';
 
 const fieldErrors = (err) => Object.fromEntries(Object.entries(err.details ?? {}).map(([k, v]) => [k, v[0]]));
 const num = (n) => Number(n ?? 0).toLocaleString();
 
-function Prices({ canManage }) {
+export function Prices({ canManage }) {
     const toast = useToast();
     const [rows, setRows] = useState(null);
     const [error, setError] = useState(null);
@@ -50,7 +48,7 @@ function Prices({ canManage }) {
     );
 }
 
-function Usage() {
+export function Usage() {
     const [range, setRange] = useState({ from: addDays(manilaToday(), -6), to: manilaToday() });
     const [rows, setRows] = useState(null);
     const [error, setError] = useState(null);
@@ -71,21 +69,6 @@ function Usage() {
                         l: r.avg_latency_ms === null ? '-' : `${num(r.avg_latency_ms)} ms`,
                     }))} />
             )}
-        </>
-    );
-}
-
-// Admins monitor (read-only); only a Super Admin can change agents or prices. The server enforces this.
-export default function AiAgents() {
-    const { user } = useAuth();
-    const canManage = user.role === 'super_admin';
-    const [tab, setTab] = useState('agents');
-    return (
-        <>
-            <h1 className="text-4xl">AI agents</h1>
-            {!canManage && <Alert tone="info" title="View only">Only a Super Admin can change agents or prices.</Alert>}
-            <Tabs tabs={[{ id: 'agents', label: 'Agents' }, { id: 'usage', label: 'Usage' }, { id: 'prices', label: 'Prices' }]} value={tab} onChange={setTab} />
-            {tab === 'agents' ? <AgentsPanel canManage={canManage} /> : tab === 'usage' ? <Usage /> : <Prices canManage={canManage} />}
         </>
     );
 }

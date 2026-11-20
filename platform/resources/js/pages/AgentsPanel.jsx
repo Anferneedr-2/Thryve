@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { get, send } from '../lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { get, send, upload as uploadFile } from '../lib/api';
+import AgentAvatar from '../components/chat/AgentAvatar';
 import { errorText, formatDateTime } from '../lib/util';
 import { Table } from '../components/ui/Layout';
 import { Button } from '../components/ui/Button';
@@ -56,7 +57,38 @@ function KeyReveal({ reveal, onClose }) {
     );
 }
 
-function AgentForm({ agent, onClose, onSaved }) {
+// The optional picture. It saves at once (it is not part of the form), and without one the agent keeps its letter.
+function AvatarField({ agent, onChanged }) {
+    const input = useRef(null);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const run = async (fn) => { setBusy(true); setError(null); try { onChanged(await fn()); } catch (e) { setError(errorText(e)); } setBusy(false); };
+    const upload = () => {
+        const file = input.current?.files?.[0];
+        if (!file) return setError('Choose a picture first.');
+        const fd = new FormData();
+        fd.append('avatar', file);
+        run(() => uploadFile(`/agents/${agent.id}/avatar`, fd)).then(() => { if (input.current) input.current.value = ''; });
+    };
+    return (
+        <div className="grid gap-3" style={{ borderTop: '1px solid var(--slate-200)', paddingTop: 16 }}>
+            <strong className="font-display" style={{ color: 'var(--sl-heading)' }}>Picture (optional)</strong>
+            <div className="flex items-center gap-3">
+                <AgentAvatar agent={agent} agents={null} size="lg" />
+                <span className="sl-help" style={{ margin: 0 }}>{agent.avatar ? 'Shown in chat instead of the letter.' : 'None added: chat shows the first letter of the name.'}</span>
+            </div>
+            {error && <Alert tone="danger" title="Could not update the picture">{error}</Alert>}
+            <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Chatbot picture file" className="sl-input" style={{ padding: 8 }} />
+            <div className="sl-btn-row">
+                <Button size="sm" disabled={busy} onClick={upload}>{busy ? 'Working...' : 'Upload picture'}</Button>
+                {agent.avatar && <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(() => send('DELETE', `/agents/${agent.id}/avatar`))}>Remove picture</Button>}
+            </div>
+            <span className="sl-help">PNG, JPEG or WebP, up to 1 MB and 2000 px. A square picture looks best; it is shown in a circle.</span>
+        </div>
+    );
+}
+
+function AgentForm({ agent, onClose, onSaved, onAvatar }) {
     const [form, setForm] = useState({ name: agent?.name ?? '', base_url: agent?.base_url ?? '', profile: agent?.profile ?? '', description: agent?.description ?? '' });
     const [errors, setErrors] = useState({});
     const [formError, setFormError] = useState(null);
@@ -85,6 +117,7 @@ function AgentForm({ agent, onClose, onSaved }) {
                 <TextField label="Description for employees (optional)" value={form.description} onChange={set('description')} error={errors.description} maxLength={200} placeholder="Helps with everyday writing and questions" help="Shown when someone picks this chatbot." />
                 {agent && <p className="sl-help">Changing the address or profile resets the status until you test again.</p>}
             </form>
+            {agent && <div className="mt-4"><AvatarField agent={agent} onChanged={(r) => onAvatar(r.avatar)} /></div>}
         </Dialog>
     );
 }
@@ -112,10 +145,13 @@ function AgentCard({ a, canManage, busyId, run, ask, edit, history }) {
     return (
         <section className="sl-card" aria-label={a.name}>
             <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                <AgentAvatar agent={a} agents={null} />
                 <div className="grid gap-1">
                     <h5 className="flex flex-wrap items-center gap-2">{a.name}{a.is_default && <Pill tone="info">Default</Pill>}{!a.is_enabled && <Pill>Disabled</Pill>}</h5>
                     <span className="sl-help" style={{ overflowWrap: 'anywhere' }}>{a.url}</span>
                     {a.description && <span className="sl-help">{a.description}</span>}
+                </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     <Pill tone={tone}>{label}</Pill>
@@ -231,7 +267,7 @@ export default function AgentsPanel({ canManage }) {
                     {agents.map((a) => <AgentCard key={a.id} a={a} canManage={canManage} busyId={busyId} run={run} ask={setConfirm} edit={(x) => setForm({ agent: x })} history={setHist} />)}
                 </div>
             )}
-            {form && <AgentForm agent={form.agent} onClose={() => setForm(null)} onSaved={(saved, created) => {
+            {form && <AgentForm agent={form.agent} onClose={() => setForm(null)} onAvatar={(avatar) => { setForm({ agent: { ...form.agent, avatar } }); load(); }} onSaved={(saved, created) => {
                 setForm(null);
                 if (created) setReveal({ agent: saved, keys: saved.keys, title: 'Agent created: save its keys' }); else toast('Saved');
                 load();

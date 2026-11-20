@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { get } from '../lib/api';
 import { formatDateTime } from '../lib/util';
-import { Table, Tabs } from '../components/ui/Layout';
+import { Table } from '../components/ui/Layout';
 import { Button } from '../components/ui/Button';
 import { ErrorState, Pill, Skeleton } from '../components/ui/Feedback';
-import Updates from './Updates';
 
 const TONE = { ok: ['success', 'Working'], warn: ['warning', 'Needs attention'], fail: ['danger', 'Not working'], unknown: ['muted', 'Not set up'] };
 
-function Health() {
+export function Health() {
     const [checks, setChecks] = useState(null);
     const [error, setError] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -34,18 +33,6 @@ function Health() {
                         detail: c.detail, at: <span className="tnum">{formatDateTime(c.checked_at)}</span>,
                     }))} />
             )}
-        </>
-    );
-}
-
-// Super Admin: dependency health and (next) updates and backups.
-export default function System() {
-    const [tab, setTab] = useState('health');
-    return (
-        <>
-            <h1 className="text-4xl">System</h1>
-            <Tabs tabs={[{ id: 'health', label: 'Health' }, { id: 'updates', label: 'Updates' }]} value={tab} onChange={setTab} />
-            {tab === 'health' ? <Health /> : <Updates />}
         </>
     );
 }

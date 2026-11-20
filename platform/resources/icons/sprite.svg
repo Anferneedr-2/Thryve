@@ -42,4 +42,5 @@
   <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.500" y="5.500" width="17" height="13" rx="2.500"/><path d="M4 7.500l8 5.500 8-5.500"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0112 0c0 5 2 6.500 2 7.500H4c0-1 2-2.500 2-7.500M10 19.500a2 2 0 004 0"/></symbol>
   <symbol id="i-panel-right" viewBox="0 0 24 24"><rect x="3.500" y="5" width="17" height="14" rx="2.500"/><path d="M14.500 5v14"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
 </svg>

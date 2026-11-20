@@ -118,10 +118,9 @@ export default function TeamAttendance() {
     return (
         <>
             <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-4xl">Team attendance</h1>
+                <p style={{ margin: 0 }}>Official records in Philippine time. Corrections are recorded with your name and the employee is not notified.</p>
                 <Button variant="primary" icon="plus" className="ml-auto" onClick={() => setDialog({ type: 'new' })}>Add a missed day</Button>
             </div>
-            <p>Official records in Philippine time. Corrections are recorded with your name and the employee is not notified.</p>
 
             <div className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <TextField label="From" type="date" value={filters.from} max={filters.to} onChange={set('from')} />

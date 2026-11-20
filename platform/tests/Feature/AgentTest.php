@@ -48,6 +48,17 @@ class AgentTest extends TestCase
 
     // ---- access ---------------------------------------------------------------------------------
 
+    public function test_a_wrong_form_entry_says_what_to_type_instead(): void
+    {
+        $sa = $this->sa();
+        $r = $this->make($sa, ['name' => '', 'base_url' => 'ftp://not-allowed.example', 'profile' => 'Bad Profile!'])->assertStatus(422);
+
+        $this->assertSame('Enter a name for the agent.', $r->json('error.details.name.0'));
+        $this->assertStringContainsString('starts with https://', $r->json('error.details.base_url.0'));
+        $this->assertStringContainsString('lowercase letters', $r->json('error.details.profile.0'));
+        $this->assertStringNotContainsString('base url field', json_encode($r->json()), 'no internal field names in what people read');
+    }
+
     public function test_only_a_super_admin_can_change_agents_and_admins_can_look(): void
     {
         $sa = $this->sa();

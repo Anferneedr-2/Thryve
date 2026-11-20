@@ -60,6 +60,38 @@ class BackupTest extends TestCase
 
     // ---- database dump and restore -------------------------------------------------------------
 
+    public function test_restoring_a_complete_backup_removes_tables_created_since(): void
+    {
+        // A migration that fails half way can leave a new table behind; the restore must take it away too.
+        $this->seedRows();
+        $before = $this->snapshotRows();
+        config(['thryve.backups.tables' => null]); // a complete backup
+        $meta = $this->b->create('before the update', 'update');
+        $this->assertTrue($meta['full']);
+
+        Schema::create('upd_leftover', fn ($t) => $t->id());
+        DB::table('upd_scratch')->truncate();
+        $this->b->restoreDatabase($meta);
+
+        $this->assertFalse(Schema::hasTable('upd_leftover'), 'the half-made table is gone');
+        $this->assertSame($before, $this->snapshotRows());
+    }
+
+    public function test_restoring_a_partial_backup_never_removes_other_tables(): void
+    {
+        $this->seedRows();
+        $meta = $this->b->create('only the scratch table', 'scheduled', [], [], ['upd_scratch']);
+        $this->assertFalse($meta['full']);
+
+        Schema::create('upd_bystander', fn ($t) => $t->id());
+        try {
+            $this->b->restoreDatabase($meta);
+            $this->assertTrue(Schema::hasTable('upd_bystander'));
+        } finally {
+            Schema::dropIfExists('upd_bystander');
+        }
+    }
+
     public function test_a_dump_restores_every_value_exactly(): void
     {
         $this->seedRows();
@@ -201,21 +233,57 @@ class BackupTest extends TestCase
 
     // ---- listing, retention, off-server copy ---------------------------------------------------
 
-    public function test_pruning_removes_only_old_scheduled_backups(): void
+    private function age(array $m, int $days): array
     {
-        $old = $this->b->create('old scheduled', 'scheduled');
-        $oldUpdate = $this->b->create('old update', 'update');
+        $m['created_at'] = now()->subDays($days)->toIso8601String();
+        file_put_contents($this->sbx.'/backups/'.$m['id'].'/meta.json', json_encode($m));
+
+        return $m;
+    }
+
+    public function test_pruning_follows_the_retention_rules(): void
+    {
+        // Scheduled backups last 14 days, backups taken before an update last 30 days.
+        $oldScheduled = $this->age($this->b->create('old scheduled', 'scheduled'), 20);
+        $recentScheduled = $this->age($this->b->create('recent scheduled', 'scheduled'), 10);
+        $oldUpdate = $this->age($this->b->create('old update', 'update'), 40);
+        $recentUpdate = $this->age($this->b->create('recent update', 'update'), 20);
         $new = $this->b->create('new scheduled', 'scheduled');
-        foreach ([$old, $oldUpdate] as $m) {
-            $m['created_at'] = now()->subDays(40)->toIso8601String();
-            file_put_contents($this->sbx.'/backups/'.$m['id'].'/meta.json', json_encode($m));
-        }
+
+        $this->assertSame(2, $this->b->prune());
+
+        $this->assertEqualsCanonicalizing([$recentScheduled['id'], $recentUpdate['id'], $new['id']], array_column($this->b->all(), 'id'));
+        $this->assertSame($new['id'], $this->b->latest('scheduled')['id']);
+    }
+
+    public function test_the_backup_an_unfinished_update_needs_is_never_pruned(): void
+    {
+        $needed = $this->age($this->b->create('before a failed update', 'update'), 90);
+        $other = $this->age($this->b->create('some other old update', 'update'), 90);
+        file_put_contents($this->sbx.'/updates/state.json', json_encode(['status' => 'failed', 'backup_id' => $needed['id']]));
 
         $this->assertSame(1, $this->b->prune());
+        $this->assertSame([$needed['id']], array_column($this->b->all(), 'id'));
 
-        $ids = array_column($this->b->all(), 'id');
-        $this->assertEqualsCanonicalizing([$oldUpdate['id'], $new['id']], $ids);
-        $this->assertSame($new['id'], $this->b->latest('scheduled')['id']);
+        // Once that update is finished (or rolled back) its backup ages out like any other.
+        file_put_contents($this->sbx.'/updates/state.json', json_encode(['status' => 'rolled_back', 'backup_id' => $needed['id']]));
+        $this->assertSame(1, $this->b->prune());
+        $this->assertSame([], $this->b->all());
+    }
+
+    public function test_off_server_copies_are_pruned_by_age_too(): void
+    {
+        Storage::fake('offsite');
+        config(['thryve.backups.offsite_disk' => 'offsite']);
+        $oldId = now()->subDays(20)->format('Ymd-His').'-aaaaaa';
+        $newId = now()->subDays(2)->format('Ymd-His').'-bbbbbb';
+        Storage::disk('offsite')->put("thryve-backups/{$oldId}/meta.json", '{}');
+        Storage::disk('offsite')->put("thryve-backups/{$newId}/meta.json", '{}');
+
+        $this->b->prune();
+
+        Storage::disk('offsite')->assertMissing("thryve-backups/{$oldId}/meta.json");
+        Storage::disk('offsite')->assertExists("thryve-backups/{$newId}/meta.json");
     }
 
     public function test_an_off_server_copy_is_made_when_a_disk_is_configured(): void
@@ -230,6 +298,9 @@ class BackupTest extends TestCase
         Storage::disk('offsite')->assertExists("thryve-backups/{$meta['id']}/files.zip");
         Storage::disk('offsite')->assertExists("thryve-backups/{$meta['id']}/meta.json");
         $this->assertSame('ok', $this->b->find($meta['id'])['offsite']);
+        // The description stored off-server already says the copy worked, so restoring from it shows the right status.
+        $remote = json_decode(Storage::disk('offsite')->get("thryve-backups/{$meta['id']}/meta.json"), true);
+        $this->assertSame('ok', $remote['offsite']);
     }
 
     public function test_off_server_copy_is_none_when_unset_and_failed_when_the_disk_is_broken(): void
@@ -254,6 +325,7 @@ class BackupTest extends TestCase
         $this->artisan('thryve:backup')->assertSuccessful();
 
         $latest = $this->b->latest('scheduled');
+        $this->artisan('thryve:backups')->expectsOutputToContain($latest['id'])->assertSuccessful(); // the id to give thryve:restore
         $this->assertSame('Scheduled backup', $latest['label']);
         $this->assertSame(1, $latest['files_count']);
         $zip = new ZipArchive;

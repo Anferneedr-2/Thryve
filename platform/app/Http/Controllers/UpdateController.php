@@ -60,6 +60,20 @@ class UpdateController extends Controller
         });
     }
 
+    /** Code was deployed and the database is behind it: run the database-only update (backup first, rollback possible). */
+    public function approveDatabase(Request $request): JsonResponse
+    {
+        $d = $request->validate(['confirm' => ['required', 'string', 'max:20']]);
+
+        return $this->guard(function () use ($request, $d) {
+            $token = $this->updates->approveDatabase($d['confirm']);
+            Audit::log('system.database_update_approved', $request->user(), null, ['changes' => count($this->updates->state()['pending_migrations'] ?? [])]);
+            $cookie = Cookie::make(Maintenance::COOKIE, $token, 0, '/', null, $request->isSecure(), true, false, 'lax');
+
+            return Api::ok($this->updates->status())->withCookie($cookie);
+        });
+    }
+
     public function advance(Request $request): JsonResponse
     {
         return $this->guard(function () use ($request) {

@@ -3,7 +3,9 @@ import { Button, IconButton } from '../components/ui/Button';
 import { Checkbox, Radio, SelectField, Switch, TextField, TextareaField } from '../components/ui/Form';
 import { Alert, Banner, EmptyState, ErrorState, Pill, Skeleton, Spinner, ToastProvider, useToast } from '../components/ui/Feedback';
 import { ConfirmDialog, Dialog, Menu } from '../components/ui/Overlay';
-import { AppNav, Card, Page, Stat, Table, Tabs } from '../components/ui/Layout';
+import { Card, Stat, Table, Tabs } from '../components/ui/Layout';
+import { PageBody, PageHeader } from '../components/shell/Page';
+import { Markdown } from '../lib/markdown';
 
 // Synthetic data only. This page exists to verify the primitives (P01.04) and is removed before launch.
 const COLUMNS = [
@@ -29,6 +31,16 @@ function Section({ title, children }) {
     );
 }
 
+const SAMPLE = [
+    '### Sample answer',
+    '- A list item',
+    '- Another with `inline code`',
+    '',
+    '```js',
+    'const total = 1 + 2;',
+    '```',
+].join('\n');
+
 function Gallery() {
     const toast = useToast();
     const [tab, setTab] = useState('a');
@@ -40,14 +52,8 @@ function Gallery() {
 
     return (
         <>
-            <AppNav
-                links={[{ id: 'components', label: 'Components', href: '#components' }, { id: 'reports', label: 'Reports', href: '#reports' }, { id: 'settings', label: 'Settings', href: '#settings' }]}
-                current={page}
-                onNavigate={setPage}
-            />
-            <Page>
-                <h1 className="text-4xl">Component gallery</h1>
-
+            <PageHeader title="Component gallery" tabs={[{ id: 'components', label: 'Components' }, { id: 'reports', label: 'Reports' }, { id: 'settings', label: 'Settings' }]} tab={page} onTab={setPage} actions={<Button variant="primary" size="sm" icon="plus">Add item</Button>} />
+            <PageBody>
                 <Section title="Buttons">
                     <div className="sl-btn-row">
                         <Button variant="primary">Save changes</Button>
@@ -125,7 +131,11 @@ function Gallery() {
                         <Card><ErrorState onRetry={() => toast('Retrying')}>We could not load this list.</ErrorState></Card>
                     </div>
                 </Section>
-            </Page>
+                <Section title="Workspace shell (page frame and chat answer)">
+                    <p>The header above is the standard page frame: title, tabs and actions, then a padded body. Chat answers render as plain text on the page; the sample below shows headings, a list and a code block.</p>
+                    <div className="m ai"><div className="body"><Markdown text={SAMPLE} /></div></div>
+                </Section>
+            </PageBody>
         </>
     );
 }

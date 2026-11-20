@@ -103,7 +103,9 @@ class MultipleChatbotsTest extends TestCase
 
         $r = $this->device($cookie)->getJson('/api/chat/agents')->assertOk();
 
-        $this->assertSame(['id', 'name', 'description', 'is_default'], array_keys($r->json('data.1')));
+        // `avatar` is the optional picture's address (null when none was added), never anything about the server.
+        $this->assertSame(['id', 'name', 'description', 'is_default', 'avatar'], array_keys($r->json('data.1')));
+        $this->assertNull($r->json('data.1.avatar'));
         $this->assertSame('Helps you improve how you work', $r->json('data.1.description'));
         foreach (['example.com', 'key-for', 'coach', 'general'] as $leak) {
             $this->assertStringNotContainsString($leak, strtolower(json_encode(array_map(fn ($a) => [$a['id'], $a['description'], $a['is_default']], $r->json('data')))));

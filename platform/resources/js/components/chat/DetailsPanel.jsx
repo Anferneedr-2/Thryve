@@ -1,6 +1,7 @@
 import Icon from '../Icon';
 import { Skeleton } from '../ui/Feedback';
-import { fmt, hue, initial, sizeText } from './chatUtil';
+import { fmt, sizeText } from './chatUtil';
+import AgentAvatar from './AgentAvatar';
 
 // The right panel: today's tokens, the files in this chat, and a few words about the assistant. Hidden until opened.
 export default function DetailsPanel({ usage, agent, agents, messages }) {
@@ -40,7 +41,7 @@ export default function DetailsPanel({ usage, agent, agents, messages }) {
                 <section aria-labelledby="cw-d-about">
                     <h2 id="cw-d-about" className="cw-h">About this assistant</h2>
                     <div className="cw-about">
-                        <div className="top"><span className={`cw-av ${hue(agents, agent.id)}`} aria-hidden="true">{initial(agent.name)}</span><b>{agent.name}</b></div>
+                        <div className="top"><AgentAvatar agent={agent} agents={agents} /><b>{agent.name}</b></div>
                         <p>{agent.description || 'Ask it for help with everyday office work: writing, summarizing, planning and explaining.'}</p>
                     </div>
                 </section>

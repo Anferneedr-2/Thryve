@@ -6,6 +6,7 @@ use App\Attendance\Tracker;
 use App\Http\Responses\Api;
 use App\Models\AttendanceDay;
 use App\Support\BusinessDay;
+use App\Updates\Maintenance;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,18 @@ class AttendanceController extends Controller
     {
         $d = $request->validate(['activity_age_seconds' => ['nullable', 'integer', 'between:0,604800']]);
         $now = CarbonImmutable::now();
+
+        // While an update or restore runs, the one browser allowed through (the updating Super Admin's) must not write:
+        // a row added between the backup and its check would make the backup look incomplete. Time in maintenance is not
+        // counted for that person.
+        if (app(Maintenance::class)->active()) {
+            return Api::ok([
+                'state' => 'active', 'paused' => true,
+                'interval_seconds' => (int) config('thryve.attendance.heartbeat_seconds'),
+                'today' => $this->today($request->user()->id),
+                'unread_notifications' => NotificationController::unreadFor($request->user()->id),
+            ]);
+        }
         $activityAt = isset($d['activity_age_seconds']) ? $now->subSeconds($d['activity_age_seconds']) : null;
 
         $session = $this->tracker->heartbeat($request->user(), $now, $activityAt);
@@ -34,6 +47,9 @@ class AttendanceController extends Controller
     /** Sent when the page is being closed. Best effort; the scheduled sweep covers a missed message. */
     public function close(Request $request): JsonResponse
     {
+        if (app(Maintenance::class)->active()) {
+            return Api::ok(['closed' => false, 'paused' => true]);
+        }
         $this->tracker->end($request->user(), CarbonImmutable::now(), 'closed');
 
         return Api::ok(['closed' => true]);

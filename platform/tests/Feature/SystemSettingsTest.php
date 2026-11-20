@@ -216,6 +216,116 @@ class SystemSettingsTest extends TestCase
         $this->assertGreaterThanOrEqual(2, AuditEntry::where('action', 'settings.branding_updated')->count());
     }
 
+    public function test_a_separate_logo_for_the_dark_theme_can_be_uploaded_served_and_removed(): void
+    {
+        $c = $this->superCookie();
+        $this->device(null)->getJson('/api/branding')->assertJsonPath('data.has_logo_dark', false);
+        $this->get('/branding/logo_dark')->assertStatus(404);
+
+        // The two logos are independent: uploading one never replaces the other.
+        $up = fn (array $f) => $this->device($c)->post('/api/settings/branding', $f, ['Accept' => 'application/json']);
+        $up(['logo' => UploadedFile::fake()->image('light.png', 120, 60)])->assertOk()->assertJsonPath('data.has_logo', true)->assertJsonPath('data.has_logo_dark', false);
+        $up(['logo_dark' => UploadedFile::fake()->image('dark.png', 120, 60)])->assertOk()->assertJsonPath('data.has_logo', true)->assertJsonPath('data.has_logo_dark', true);
+
+        $img = $this->get('/branding/logo_dark')->assertOk();
+        $img->assertHeader('Content-Type', 'image/png');
+        $img->assertHeader('X-Content-Type-Options', 'nosniff');
+        $this->assertEqualsCanonicalizing(['branding/logo.png', 'branding/logo_dark.png'], Storage::disk('private')->allFiles('branding'));
+        $this->device(null)->getJson('/api/branding')->assertJsonPath('data.has_logo_dark', true);
+
+        // Same safety rules as the normal logo.
+        $up(['logo_dark' => UploadedFile::fake()->createWithContent('dark.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')])->assertStatus(422);
+        $up(['logo_dark' => UploadedFile::fake()->image('big.png', 3000, 3000)])->assertStatus(422);
+
+        $this->device($c)->deleteJson('/api/settings/branding/logo_dark')->assertOk()->assertJsonPath('data.has_logo_dark', false)->assertJsonPath('data.has_logo', true);
+        $this->get('/branding/logo_dark')->assertStatus(404);
+        $this->get('/branding/logo')->assertOk();
+    }
+
+    public function test_a_logo_for_the_login_page_is_independent_of_the_other_logos(): void
+    {
+        $c = $this->superCookie();
+        $up = fn (array $f) => $this->device($c)->post('/api/settings/branding', $f, ['Accept' => 'application/json']);
+        $up(['logo' => UploadedFile::fake()->image('light.png', 120, 60), 'logo_dark' => UploadedFile::fake()->image('dark.png', 120, 60)])->assertOk();
+        $this->device(null)->getJson('/api/branding')->assertJsonPath('data.has_logo_login', false);
+        $this->get('/branding/logo_login')->assertStatus(404);
+
+        $up(['logo_login' => UploadedFile::fake()->image('login.png', 300, 90)])->assertOk()
+            ->assertJsonPath('data.has_logo', true)->assertJsonPath('data.has_logo_dark', true)->assertJsonPath('data.has_logo_login', true);
+        $this->get('/branding/logo_login')->assertOk()->assertHeader('Content-Type', 'image/png')->assertHeader('X-Content-Type-Options', 'nosniff');
+        $this->assertEqualsCanonicalizing(['branding/logo.png', 'branding/logo_dark.png', 'branding/logo_login.png'], Storage::disk('private')->allFiles('branding'));
+
+        $up(['logo_login' => UploadedFile::fake()->createWithContent('login.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')])->assertStatus(422);
+
+        $this->device($c)->deleteJson('/api/settings/branding/logo_login')->assertOk()
+            ->assertJsonPath('data.has_logo_login', false)->assertJsonPath('data.has_logo', true)->assertJsonPath('data.has_logo_dark', true);
+        $this->get('/branding/logo_login')->assertStatus(404);
+    }
+
+    public function test_app_icons_and_the_manifest_are_made_from_the_favicon(): void
+    {
+        $c = $this->superCookie();
+
+        // With no favicon: no icons, and the manifest still names the app without them.
+        $this->get('/branding/icon/192')->assertStatus(404);
+        $empty = $this->get('/manifest.webmanifest')->assertOk();
+        $empty->assertHeader('Content-Type', 'application/manifest+json');
+        $this->assertSame('Thryve', $empty->json('name'));
+        $this->assertSame([], $empty->json('icons'));
+        $this->assertStringNotContainsString('apple-touch-icon', $this->get('/')->getContent());
+        $this->assertStringContainsString('<link rel="manifest" href="/manifest.webmanifest">', $this->get('/')->getContent());
+
+        // A non-square favicon becomes square icons of every size, centred on a transparent square.
+        $this->device($c)->post('/api/settings/branding', ['favicon' => UploadedFile::fake()->image('fav.png', 300, 100)], ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('data.favicon_png', true);
+        foreach ([32, 180, 192, 512] as $size) {
+            $r = $this->get("/branding/icon/{$size}")->assertOk();
+            $r->assertHeader('Content-Type', 'image/png');
+            $r->assertHeader('X-Content-Type-Options', 'nosniff');
+            $this->assertSame([$size, $size], array_slice(getimagesizefromstring($r->getContent()), 0, 2), "icon {$size}");
+        }
+        // The iPhone icon sits on white; the others keep their transparent padding (GD alpha 127 = fully transparent).
+        $alphaAtCorner = fn (int $size) => (imagecolorat($im = imagecreatefromstring($this->get("/branding/icon/{$size}")->getContent()), 0, 0) >> 24) & 127;
+        $this->assertSame(0, $alphaAtCorner(180));
+        $this->assertSame(127, $alphaAtCorner(192));
+        $this->get('/branding/icon/100')->assertStatus(404); // only the listed sizes
+        $this->get('/branding/icon/abc')->assertStatus(404);
+
+        $m = $this->get('/manifest.webmanifest')->assertOk();
+        $this->assertSame(['192x192', '512x512'], array_column($m->json('icons'), 'sizes'));
+        $this->assertMatchesRegularExpression('#^/branding/icon/192\?v=\d+$#', $m->json('icons.0.src'));
+        $this->assertSame('standalone', $m->json('display'));
+        $this->device($c)->patchJson('/api/settings', ['company_name' => 'Acme Corp'])->assertOk();
+        $this->assertSame('Acme Corp', $this->get('/manifest.webmanifest')->json('name'));
+
+        // The page head points at all of it, with a tab colour for each theme.
+        $page = $this->get('/')->getContent();
+        $this->assertMatchesRegularExpression('#<link rel="apple-touch-icon" href="/branding/icon/180\?v=\d+">#', $page);
+        $this->assertMatchesRegularExpression('#<link rel="icon" type="image/png" sizes="32x32" href="/branding/icon/32\?v=\d+">#', $page);
+        $this->assertStringContainsString('<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">', $page);
+        $this->assertStringContainsString('<meta name="theme-color" content="#111a2e" media="(prefers-color-scheme: dark)">', $page);
+
+        // Removing the favicon removes the icons again.
+        $this->device($c)->deleteJson('/api/settings/branding/favicon')->assertOk();
+        $this->get('/branding/icon/192')->assertStatus(404);
+        $this->assertSame([], $this->get('/manifest.webmanifest')->json('icons'));
+    }
+
+    public function test_an_ico_favicon_is_used_for_the_tab_but_no_app_icons_are_made_from_it(): void
+    {
+        $c = $this->superCookie();
+        // An ICO file (the test tools label files by name, so the type is stated): the tab can use it, but it cannot be resized into app icons.
+        $this->device($c)->post('/api/settings/branding', ['favicon' => UploadedFile::fake()->create('favicon.ico', 1, 'image/x-icon')], ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('data.has_favicon', true)->assertJsonPath('data.favicon_png', false);
+
+        $this->get('/branding/favicon')->assertOk();
+        $this->get('/branding/icon/192')->assertStatus(404);
+        $this->assertSame([], $this->get('/manifest.webmanifest')->json('icons'));
+        $page = $this->get('/')->getContent();
+        $this->assertStringContainsString('<link rel="icon" href="/branding/favicon?v=', $page);
+        $this->assertStringNotContainsString('apple-touch-icon', $page);
+    }
+
     public function test_unsafe_or_oversized_images_are_rejected(): void
     {
         $c = $this->superCookie();

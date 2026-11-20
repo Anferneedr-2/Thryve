@@ -43,7 +43,6 @@ export default function Account() {
 
     return (
         <>
-            <h1 className="text-4xl">Account</h1>
             <div className="grid gap-4 lg:grid-cols-2">
                 <Card title="Profile">
                     <dl className="grid gap-3" style={{ margin: 0 }}>

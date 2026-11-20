@@ -76,7 +76,8 @@ return [
     'backups' => [
         'path' => env('THRYVE_BACKUP_PATH', storage_path('app/private/backups')),
         'offsite_disk' => env('THRYVE_BACKUP_OFFSITE_DISK'),
-        'retention_days' => 14,
+        'retention_days' => 14, // scheduled (nightly) backups, here and off-server
+        'update_retention_days' => 30, // backups taken before an update; the one an unfinished update needs is never removed
         'tables' => null, // null = every table; tests restrict this to a scratch table
         'schedule_time' => '02:00', // Philippine time
     ],

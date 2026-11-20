@@ -39,7 +39,7 @@ Route::middleware(['web', 'installed'])->group(function () {
     Route::get('/branding', [BrandingController::class, 'show']);
 
     // Authenticated boundary: signed in, active, and still the account's single current session.
-    Route::middleware(['auth', 'current-session'])->group(function () {
+    Route::middleware(['auth', 'current-session', 'db-current'])->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
@@ -57,6 +57,7 @@ Route::middleware(['web', 'installed'])->group(function () {
 
         // Own conversations (private to the signed-in person).
         Route::get('/chat/agents', [\App\Http\Controllers\ChatController::class, 'agents']);
+        Route::get('/agents/{id}/avatar', [\App\Http\Controllers\AgentAvatarController::class, 'show'])->whereNumber('id'); // the optional chatbot picture
         Route::get('/conversations', [\App\Http\Controllers\ChatController::class, 'index']);
         Route::post('/chat', [\App\Http\Controllers\ChatController::class, 'send'])->middleware('throttle:30,1');
         Route::get('/conversations/{id}', [\App\Http\Controllers\ChatController::class, 'show'])->whereNumber('id');
@@ -118,6 +119,8 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/settings/branding', [BrandingController::class, 'upload']);
             Route::delete('/settings/branding/{kind}', [BrandingController::class, 'destroy']);
             Route::post('/agents', [\App\Http\Controllers\AgentController::class, 'store']);
+            Route::post('/agents/{id}/avatar', [\App\Http\Controllers\AgentAvatarController::class, 'upload'])->whereNumber('id');
+            Route::delete('/agents/{id}/avatar', [\App\Http\Controllers\AgentAvatarController::class, 'destroy'])->whereNumber('id');
             Route::patch('/agents/{id}', [\App\Http\Controllers\AgentController::class, 'update'])->whereNumber('id');
             Route::delete('/agents/{id}', [\App\Http\Controllers\AgentController::class, 'destroy'])->whereNumber('id');
             Route::post('/agents/{id}/test', [\App\Http\Controllers\AgentController::class, 'test'])->whereNumber('id')->middleware('throttle:20,1');
@@ -134,6 +137,7 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::get('/system/updates', [UpdateController::class, 'status']);
             Route::post('/system/updates/stage', [UpdateController::class, 'stage'])->middleware('throttle:10,1');
             Route::post('/system/updates/approve', [UpdateController::class, 'approve']);
+            Route::post('/system/updates/database', [UpdateController::class, 'approveDatabase']); // new code was deployed: bring the database up to date
             Route::post('/system/updates/advance', [UpdateController::class, 'advance']);
             Route::post('/system/updates/rollback', [UpdateController::class, 'rollback']);
             Route::delete('/system/updates/staged', [UpdateController::class, 'discard']);

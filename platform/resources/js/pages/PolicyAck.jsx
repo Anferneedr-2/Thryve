@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { get } from '../lib/api';
-import { Button } from '../components/ui/Button';
 import { Checkbox } from '../components/ui/Form';
-import { Alert, ErrorState, Skeleton } from '../components/ui/Feedback';
-import { Brand } from '../lib/branding';
+import { ErrorState, Skeleton } from '../components/ui/Feedback';
+import GuestFrame from '../components/GuestFrame';
+import Icon from '../components/Icon';
 
 // Shown once per policy version, before anything else in the app.
 export default function PolicyAck() {
@@ -25,23 +25,20 @@ export default function PolicyAck() {
     };
 
     return (
-        <main className="mx-auto flex min-h-screen w-full max-w-[640px] flex-col justify-center gap-6 px-6 py-10">
-            <Brand className="font-display text-3xl font-extrabold text-navy" />
-            <section className="sl-card" aria-labelledby="policy-title">
-                <h1 id="policy-title" className="text-3xl">{policy?.title ?? 'Before you start'}</h1>
-                <p>Welcome, {user.name}. Please read this and confirm before you continue.</p>
-                {loadError ? <ErrorState onRetry={load}>{loadError.message}</ErrorState> : !policy ? <Skeleton lines={4} /> : (
-                    <>
-                        <div className="grid gap-3" style={{ color: 'var(--sl-text)' }}>{policy.body.map((t, i) => <p key={i}>{t}</p>)}</div>
-                        <Checkbox label="I have read and understand this policy." checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
-                    </>
-                )}
-                {error && <Alert tone="danger" title="Could not save">{error}</Alert>}
-                <div className="sl-btn-row mt-2 justify-end">
-                    <Button onClick={logout}>Sign out</Button>
-                    <Button variant="primary" disabled={!agreed || busy || !policy} onClick={submit}>{busy ? 'Saving...' : 'Continue'}</Button>
-                </div>
-            </section>
-        </main>
+        <GuestFrame width={520} label="Usage policy">
+            <h1 id="policy-title">{policy?.title ?? 'Before you start'}</h1>
+            <p className="lg-lead">Welcome, {user.name}. Please read this and confirm before you continue.</p>
+            {loadError ? <div className="mt-4"><ErrorState onRetry={load}>{loadError.message}</ErrorState></div> : !policy ? <div className="mt-4"><Skeleton lines={4} /></div> : (
+                <>
+                    <div className="lg-policy">{policy.body.map((t, i) => <p key={i}>{t}</p>)}</div>
+                    <div className="mt-4"><Checkbox label="I have read and understand this policy." checked={agreed} onChange={(e) => setAgreed(e.target.checked)} /></div>
+                </>
+            )}
+            {error && <div className="lg-msg bad" role="alert"><Icon name="alert" /><div><b>Could not save</b>{error}</div></div>}
+            <div className="lg-actions">
+                <button type="button" className="lg-btn ghost" onClick={logout}>Sign out</button>
+                <button type="button" className="lg-btn" disabled={!agreed || busy || !policy} onClick={submit}>{busy ? 'Saving...' : 'Continue'}</button>
+            </div>
+        </GuestFrame>
     );
 }

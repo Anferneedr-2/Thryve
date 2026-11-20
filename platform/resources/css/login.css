@@ -1,0 +1,95 @@
+/* Sign-in page: option B (split screen) from design-proposals/login-options.html, approved by the owner.
+   Colours, type, radii and shadows are the brand tokens; only the blue brand panel gradient is added (light and dark). */
+
+/* ---- the logo: mark and company name (P02A.02 will feed the supplied light and dark files through here) ---- */
+.brandlogo.word{display:inline-flex;align-items:center;gap:10px;font:800 24px var(--font-display);color:var(--sl-heading);letter-spacing:-.02em;line-height:1}
+.brandlogo-mark{border-radius:11px;background:var(--blue-600);color:#fff;display:grid;place-items:center;font-family:var(--font-display);font-weight:800;box-shadow:0 6px 14px var(--sl-accent-shadow);flex:none}
+html[data-theme="dark"] .brandlogo-mark{color:#0b1220}
+.brandlogo.word.on-brand{color:#fff}
+.brandlogo.word.on-brand .brandlogo-mark{background:#fff;color:#315eef;box-shadow:none}
+.brandlogo-chip{display:inline-flex;background:#fff;border-radius:14px;padding:8px 14px;align-self:flex-start}
+
+/* ---- the uploaded logo: one file per theme (Settings > Logo and favicon) ---- */
+.logo-img{display:block;height:var(--logo-h,28px);width:auto;max-width:200px;object-fit:contain}
+.logo-img.dk{display:none}
+html[data-theme="dark"] .logo-img.lt{display:none}
+html[data-theme="dark"] .logo-img.dk{display:block}
+/* no dark logo uploaded: keep the normal one visible on dark pages by giving it a white backing */
+html[data-theme="dark"] .logo-img.lt.nodark{display:block;background:#fff;border-radius:10px;padding:4px 8px;box-sizing:content-box}
+/* inside the blue panel and its white chip the normal logo is always right */
+.logo-img.on-panel{display:block!important;background:none!important;padding:0!important;max-width:min(100%,340px)}
+
+/* ---- the page ---- */
+.lg-page{--lg-a:#315eef;--lg-b:#5b82f5;position:relative;min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);background:var(--surface);color:var(--sl-text)}
+html[data-theme="dark"] .lg-page{--lg-a:#1b2f8f;--lg-b:#2f4fd0}
+
+.lg-brand{order:-1;position:relative;overflow:hidden;color:#fff;padding:40px;display:flex;flex-direction:column;justify-content:space-between;gap:24px;background:linear-gradient(150deg,var(--lg-a),var(--lg-b))}
+.lg-brand::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 20% 110%,rgba(255,255,255,.22),transparent 55%),repeating-radial-gradient(circle at 85% 8%,rgba(255,255,255,.09) 0 1px,transparent 1px 38px);pointer-events:none}
+/* a soft darkening at the foot of the panel keeps the small white text readable where the gradient is lightest */
+.lg-brand::after{content:"";position:absolute;left:0;right:0;bottom:0;height:78%;background:linear-gradient(to top,rgba(8,16,70,.42),rgba(8,16,70,.2) 55%,transparent);pointer-events:none}
+.lg-brand>*{position:relative;z-index:1}
+.lg-brand h2{margin:0;color:#fff;font:800 34px/1.12 var(--font-display);letter-spacing:-.025em;max-width:14ch;text-wrap:balance}
+.lg-brand ul{list-style:none;margin:22px 0 0;padding:0;display:grid;gap:12px;font-size:15px}
+.lg-brand li{display:flex;gap:12px;align-items:center;color:#fff}
+.lg-brand li i{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none}
+.lg-brand li .ic{width:16px;height:16px}
+.lg-brand small{color:#fff;font:500 12.5px var(--font-body);letter-spacing:.02em}
+
+.lg-form{display:grid;align-content:center;padding:40px clamp(24px,6vw,64px);background:var(--surface)}
+.lg-inner{width:min(100%,380px);margin:0 auto}
+.lg-inner>.brandlogo{display:none;margin-bottom:26px}
+.lg-inner h1{margin:0;color:var(--sl-heading);font:800 28px/1.2 var(--font-display);letter-spacing:-.02em;text-wrap:balance}
+.lg-lead{margin:6px 0 0;color:var(--sl-muted)}
+
+.lg-msg{margin-top:18px;border:1px solid;border-radius:14px;padding:12px 14px;font-size:14px;display:flex;gap:10px}
+.lg-msg b{display:block;font:700 14.5px var(--font-display)}
+.lg-msg .ic{width:18px;height:18px;flex:none;margin-top:2px}
+.lg-msg.bad{background:var(--red-50);border-color:var(--red-200);color:var(--red-600)}
+.lg-msg.warn{background:var(--amber-50);border-color:var(--amber-200);color:var(--amber-700)}
+
+.lg-login{display:grid;gap:16px;margin-top:22px}
+.lg-login label{display:grid;gap:6px;font:600 13px var(--font-body);color:var(--sl-heading)}
+.lg-field{position:relative;display:block}
+.lg-field input{width:100%;height:50px;border:1.5px solid var(--field-border);background:var(--surface);color:var(--sl-heading);border-radius:14px;padding:0 16px;font:400 15.5px var(--font-body)}
+.lg-field input::placeholder{color:var(--sl-muted)} /* the brand placeholder tone is 4.4:1 on white; the muted tone is 4.8:1 */
+.lg-field input:focus{outline:0;border-color:var(--blue-600);box-shadow:0 0 0 4px var(--sl-accent-soft)}
+.lg-field.err input{border-color:var(--red-600)}
+.lg-field.pw input{padding-right:52px}
+.lg-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:44px;height:44px;border:0;border-radius:50%;background:none;color:var(--sl-muted);display:grid;place-items:center;cursor:pointer}
+.lg-eye:hover{background:var(--slate-100)}
+.lg-eye:focus-visible,.lg-tgl:focus-visible{outline:2px solid var(--blue-600);outline-offset:1px}
+.lg-eye .ic,.lg-tgl .ic{width:20px;height:20px}
+.lg-eye[aria-pressed="true"]{color:var(--blue-600)}
+.lg-hint{font:500 12.5px var(--font-body);color:var(--amber-700);display:flex;align-items:center;gap:6px;margin-top:-2px}
+
+.lg-btn{height:52px;border:0;border-radius:9999px;background:var(--blue-600);color:#fff;font:700 16px var(--font-display);cursor:pointer;box-shadow:0 8px 18px var(--sl-accent-shadow);display:inline-flex;align-items:center;justify-content:center;gap:10px;width:100%}
+html[data-theme="dark"] .lg-btn{color:#0b1220}
+.lg-btn:hover:not(:disabled){filter:brightness(1.06)}
+.lg-btn:focus-visible{outline:2px solid var(--blue-600);outline-offset:3px}
+.lg-btn:disabled{opacity:.6;cursor:not-allowed;box-shadow:none}
+.lg-btn.busy:disabled{opacity:.8;cursor:progress}
+.lg-spin{width:16px;height:16px;border-radius:50%;border:2.5px solid currentColor;border-right-color:transparent;animation:lgspin .8s linear infinite}
+@keyframes lgspin{to{transform:rotate(360deg)}}
+.lg-help{font-size:13px;color:var(--sl-muted);margin:18px 0 0}
+.lg-btn.ghost{background:transparent;color:var(--blue-600);box-shadow:none;border:1.5px solid var(--sl-line)}
+html[data-theme="dark"] .lg-btn.ghost{color:var(--blue-600)}
+.lg-btn.ghost:hover:not(:disabled){background:var(--blue-100);filter:none}
+.lg-policy{display:grid;gap:12px;margin-top:18px;color:var(--sl-text);line-height:1.65}
+.lg-policy p{margin:0}
+.lg-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:22px}
+.lg-actions .lg-btn{width:auto;flex:1 1 140px}
+/* the installer keeps its own form controls: give the content column room and keep headings consistent */
+.lg-inner .sl-field label,.lg-inner .sl-label{font-size:13px}
+
+.lg-tgl{position:absolute;top:14px;right:14px;width:44px;height:44px;border-radius:50%;border:1px solid var(--sl-line);background:var(--surface);color:var(--sl-muted);display:grid;place-items:center;cursor:pointer;z-index:3}
+.lg-tgl:hover{color:var(--blue-600);border-color:var(--blue-200)}
+
+/* ---- phones: the brand panel folds away and a small logo heads the form ---- */
+@media (max-width:760px){
+  .lg-page{grid-template-columns:1fr}
+  .lg-brand{display:none}
+  .lg-form{padding:28px 22px;align-content:start}
+  .lg-inner>.brandlogo{display:inline-flex}
+  .lg-inner h1{font-size:26px}
+}
+@media (prefers-reduced-motion:reduce){.lg-spin{animation:none}}

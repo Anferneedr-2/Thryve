@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 export const fmt = (n) => Number(n).toLocaleString();
 export const sizeText = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 export const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
@@ -10,6 +12,7 @@ export function ago(iso) {
     const seconds = Math.max(0, (Date.now() - d.getTime()) / 1000);
     const now = new Date();
     const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    if (seconds < 60) return 'Now';
     if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))} min`;
     if (days <= 0) return `${Math.floor(seconds / 3600)} h`;
     if (days === 1) return 'Yesterday';
@@ -30,3 +33,16 @@ export const SUGGESTIONS = [
     'Explain this spreadsheet formula in plain words',
     'Help me outline a one-page project update',
 ];
+
+// Re-renders the caller every `ms` so relative times ("5 min") keep moving without any new data arriving. It also
+// refreshes when the tab becomes visible again, since timers are throttled in background tabs.
+export function useNow(ms = 30000) {
+    const [, tick] = useState(0);
+    useEffect(() => {
+        const bump = () => tick((n) => n + 1);
+        const t = setInterval(bump, ms);
+        const vis = () => { if (document.visibilityState === 'visible') bump(); };
+        document.addEventListener('visibilitychange', vis);
+        return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+    }, [ms]);
+}

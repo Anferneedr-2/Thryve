@@ -17,6 +17,12 @@ function xsrfToken() {
 // Error codes that mean "this browser session is no longer valid" (anything but a bad login attempt).
 const SESSION_LOST = new Set(['unauthenticated', 'session_replaced', 'session_terminated', 'account_deactivated']);
 
+// While an update runs the server answers everything with 503 "maintenance" (except for the Super Admin doing it).
+// The page shows a notice instead of a pile of errors (see MaintenanceNotice).
+const tellMaintenance = (err) => {
+    if (err.status === 503 && err.code === 'maintenance') window.dispatchEvent(new CustomEvent('api:maintenance', { detail: { message: err.message } }));
+};
+
 export async function api(path, { method = 'GET', body } = {}) {
     const headers = { Accept: 'application/json' };
     if (body) headers['Content-Type'] = 'application/json';
@@ -39,6 +45,7 @@ export async function api(path, { method = 'GET', body } = {}) {
         if (res.status === 401 && SESSION_LOST.has(err.code)) {
             window.dispatchEvent(new CustomEvent('api:session-lost', { detail: { code: err.code, message: err.message } }));
         }
+        tellMaintenance(err);
         throw err;
     }
     return { data: json?.data, meta: json?.meta };
@@ -66,6 +73,7 @@ export async function upload(path, formData) {
         const e = json?.error;
         const err = new ApiError(e?.code ?? 'http_error', e?.message ?? 'Something went wrong.', e?.details ?? {}, res.status);
         if (res.status === 401 && SESSION_LOST.has(err.code)) window.dispatchEvent(new CustomEvent('api:session-lost', { detail: { code: err.code, message: err.message } }));
+        tellMaintenance(err);
         throw err;
     }
     return json?.data;

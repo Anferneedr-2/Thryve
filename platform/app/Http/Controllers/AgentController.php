@@ -42,7 +42,7 @@ class AgentController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $d = $request->validate($this->rules());
+        $d = $request->validate($this->rules(), $this->messages());
         if ($bad = $this->addressProblem($d['base_url'])) {
             return Api::error('validation_failed', $bad, 422, ['base_url' => [$bad]]);
         }
@@ -54,7 +54,7 @@ class AgentController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $a = $this->find($id);
-        $d = $request->validate(array_map(fn ($r) => array_merge(['sometimes'], $r), $this->rules(false)) + ['is_enabled' => ['sometimes', 'boolean'], 'is_default' => ['sometimes', 'boolean']]);
+        $d = $request->validate(array_map(fn ($r) => array_merge(['sometimes'], $r), $this->rules(false)) + ['is_enabled' => ['sometimes', 'boolean'], 'is_default' => ['sometimes', 'boolean']], $this->messages());
         if (isset($d['base_url']) && ($bad = $this->addressProblem($d['base_url']))) {
             return Api::error('validation_failed', $bad, 422, ['base_url' => [$bad]]);
         }
@@ -158,6 +158,20 @@ class AgentController extends Controller
         return Api::ok(['agent' => $agent->slug, 'time' => now()->toIso8601String()]);
     }
 
+    /** What the person sees under a field: what is wrong and what to type instead. */
+    private function messages(): array
+    {
+        return [
+            'name.required' => 'Enter a name for the agent.',
+            'name.max' => 'Use 100 characters or fewer.',
+            'base_url.required' => 'Enter the server address, for example https://ai.yourcompany.com.',
+            'base_url.url' => 'Enter a full address that starts with https:// (or http:// on this computer), for example https://ai.yourcompany.com.',
+            'base_url.max' => 'That address is too long.',
+            'profile.regex' => 'Use lowercase letters, numbers, dashes or underscores, starting with a letter or number, for example thryve-bot.',
+            'description.max' => 'Use 200 characters or fewer.',
+        ];
+    }
+
     private function rules(bool $required = true): array
     {
         $req = $required ? 'required' : 'nullable';
@@ -198,6 +212,7 @@ class AgentController extends Controller
     {
         return [
             'id' => $a->id, 'name' => $a->name, 'slug' => $a->slug, 'base_url' => $a->base_url, 'profile' => $a->profile, 'description' => $a->description, 'url' => $a->url(),
+            'avatar' => \App\Support\AgentAvatar::url($a->id),
             'is_enabled' => $a->is_enabled, 'is_default' => $a->is_default, 'status' => $a->status,
             'last_checked_at' => $a->last_checked_at?->toIso8601String(), 'last_latency_ms' => $a->last_latency_ms,
             'has_key' => $a->outbound_key !== null, 'key_fingerprint' => $a->outbound_fingerprint,

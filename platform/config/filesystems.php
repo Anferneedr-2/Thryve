@@ -57,6 +57,23 @@ return [
             'report' => false,
         ],
 
+        // Off-server backups (decision D10): SFTP to the Hermes VPS, a different machine from the web host. Used only when
+        // THRYVE_BACKUP_OFFSITE_DISK=offsite is set in .env. Use a dedicated VPS user with a key and no shell rights beyond
+        // its own backup folder.
+        'offsite' => [
+            'driver' => 'sftp',
+            'host' => env('THRYVE_OFFSITE_HOST'),
+            'port' => (int) env('THRYVE_OFFSITE_PORT', 22),
+            'username' => env('THRYVE_OFFSITE_USER'),
+            'privateKey' => env('THRYVE_OFFSITE_KEY_PATH'),
+            'passphrase' => env('THRYVE_OFFSITE_KEY_PASSPHRASE'),
+            'hostFingerprint' => env('THRYVE_OFFSITE_HOST_FINGERPRINT'),
+            'root' => env('THRYVE_OFFSITE_PATH', '/var/backups/thryve'),
+            'timeout' => 30,
+            'throw' => true,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

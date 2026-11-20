@@ -19,7 +19,7 @@ class CheckMaintenance
     public function handle(Request $request, Closure $next): Response
     {
         $data = $this->maintenance->data();
-        if ($data === null || $request->is('up') || $this->maintenance->allows($request->cookie(Maintenance::COOKIE))) {
+        if ($data === null || $request->is('up') || $request->is('branding/*') || $this->maintenance->allows($request->cookie(Maintenance::COOKIE))) {
             return $next($request);
         }
         $message = $data['message'] ?? 'The platform is being updated. Please try again in a few minutes.';

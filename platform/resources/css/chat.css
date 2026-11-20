@@ -53,6 +53,9 @@
 .cw-av.h3{background:linear-gradient(135deg,var(--violet),var(--indigo))}
 .cw-av.h4{background:linear-gradient(135deg,var(--sky),var(--blue-500))}
 .cw-av.lg{width:68px;height:68px;font-size:26px}
+/* a chatbot picture replaces the letter and the colour: shown as a circle, cropped to fill it */
+.cw-av.img{background:var(--slate-100);overflow:hidden}
+.cw-av.img img{width:100%;height:100%;object-fit:cover;display:block}
 .cw-chip{white-space:nowrap;flex:none;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--sl-line);background:var(--surface);color:var(--sl-heading);border-radius:9999px;padding:8px 14px;font:500 14px var(--font-body);cursor:default;max-width:100%}
 .cw-chip.on{border-color:var(--blue-200);background:var(--blue-100);color:var(--blue-600);font-weight:600}
 button.cw-chip{cursor:pointer}
@@ -168,7 +171,9 @@ button.cw-chip{cursor:pointer}
 @media (max-width:767px){
   .cw-hd{padding:0 12px;gap:10px;min-height:64px}
   .cw-main{grid-template-rows:64px minmax(0,1fr) auto}
-  .cw-hd h1{font-size:17px}
+  .cw-hd h1{font-size:17px;flex:1 1 0}
+  .cw-hd .cw-chip,.cw-hd .sl-menu-wrap{display:none} /* on phones the title gets the room; the assistant is chosen from the chats list */
+  .cw-hd .grow{display:none}
   .m-wrap{padding:20px 16px 12px}
   .cw-dock{padding:6px 12px 12px}
   .cw-composer{border-radius:26px;padding:6px}
@@ -176,5 +181,54 @@ button.cw-chip{cursor:pointer}
   .m.user{max-width:88%}
   .m-thread{gap:26px}
   .cw-welcome h2{font-size:26px}
+  /* the chats panel is the phone home screen: full width, not a drawer */
+  .cw[data-lov=true] .cw-left{width:100%;box-shadow:none}
+  .cw-backdrop{display:none}
+  .ic.flip{transform:scaleX(-1)}
+}
+/* Touch targets: 44 px or larger wherever a finger is the pointer. */
+@media (max-width:767px),(pointer:coarse){
+  .cw-new{height:44px;min-height:44px;padding:0 18px 0 14px}
+  .cw-sec .acts button{min-height:44px;min-width:44px;padding:0 6px}
+  .cw-rowbtn{width:44px;height:44px}
+  .cv-main{min-height:64px}
+  .m-acts .sl-iconbtn{width:44px;height:44px}
+  .chat-md .md-code figcaption button{min-height:44px;min-width:44px}
+  .m-eb{width:44px;height:44px}
+  .cw-composer .tools .cw-tgl,.cw-composer .tools .cw-send,.cw-composer .tools .cw-mic{width:44px;height:44px}
+  .cw-composer textarea{min-height:44px}
 }
 @media (prefers-reduced-motion:reduce){.cw,.cw-left,.cw-right{transition:none!important}}
+
+/* ---- rich answer content (P05A.05): readable at full column width, wide things scroll inside their own box ---- */
+.chat-md{overflow-wrap:anywhere;word-break:normal}
+.chat-md>*:first-child{margin-top:0}
+.chat-md>*:last-child{margin-bottom:0}
+.chat-md p,.chat-md ul,.chat-md ol,.chat-md blockquote,.chat-md .md-code,.chat-md .md-table{margin:0 0 1em}
+.chat-md h3,.chat-md h4,.chat-md h5,.chat-md h6{font-family:var(--font-heading);color:var(--sl-heading);line-height:1.3;margin:1.5em 0 .5em}
+.chat-md h3{font-size:23px}.chat-md h4{font-size:20px}.chat-md h5{font-size:18px}.chat-md h6{font-size:17px}
+.chat-md li{margin:.25em 0}
+.chat-md li>ul,.chat-md li>ol{margin:.25em 0 .25em}
+.chat-md li>p{margin:0 0 .4em}
+.chat-md ul ul{list-style:circle}.chat-md ul ul ul{list-style:square}
+.chat-md ol ol{list-style:lower-alpha}
+.chat-md hr{border:0;border-top:1px solid var(--sl-line);margin:1.6em 0}
+.chat-md blockquote{border-left:3px solid var(--brand);padding:2px 0 2px 16px;color:var(--sl-muted)}
+.chat-md blockquote p:last-child{margin-bottom:0}
+.chat-md del{color:var(--sl-muted)}
+.chat-md a{color:var(--blue-600);text-underline-offset:3px}
+.chat-md :not(pre)>code{font-family:var(--font-mono);font-size:.88em;background:var(--blue-100);color:var(--sl-heading);border-radius:6px;padding:2px 6px}
+
+.md-code{border:1px solid var(--sl-line);border-radius:16px;overflow:hidden;background:var(--surface)}
+.md-code figcaption{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 8px 6px 16px;background:var(--blue-100);border-bottom:1px solid var(--sl-line);font:600 12px var(--font-body);letter-spacing:.06em;text-transform:uppercase;color:var(--sl-muted)}
+.md-code figcaption button{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border:0;border-radius:9999px;background:transparent;color:var(--blue-600);font:600 13px var(--font-body);letter-spacing:0;text-transform:none;cursor:pointer}
+.md-code figcaption button:hover{background:var(--surface)}
+.md-code figcaption button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.md-code figcaption .ic{width:16px;height:16px}
+.md-code pre{margin:0;padding:14px 16px;overflow-x:auto;background:transparent;border:0;border-radius:0;font:14px/1.65 var(--font-mono);tab-size:4;white-space:pre}
+.md-code pre code{background:transparent;padding:0;font:inherit;overflow-wrap:normal}
+.md-table{max-width:100%}
+.md-table .sl-table{width:max-content;min-width:100%}
+.md-table th,.md-table td{min-width:96px;max-width:340px;vertical-align:top;overflow-wrap:break-word}
+.chat-md h3,.chat-md h4,.chat-md h5,.chat-md h6{font-weight:700}
+.md-code pre,.chat-md code{font-variant-ligatures:none}

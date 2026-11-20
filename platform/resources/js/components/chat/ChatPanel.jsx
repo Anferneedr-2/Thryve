@@ -2,11 +2,13 @@ import { useMemo, useRef, useState } from 'react';
 import Icon from '../Icon';
 import { Skeleton } from '../ui/Feedback';
 import { Menu } from '../ui/Overlay';
-import { ago, hue, initial } from './chatUtil';
+import { ago, hue, useNow } from './chatUtil';
+import AgentAvatar from './AgentAvatar';
 
 // The left panel: New chat, the assistants this person may use, then their recent chats.
 // Choosing an assistant filters the chats and sets who the next new chat is with; the chip clears the filter.
 export default function ChatPanel({ agents, picked, filter, onPick, onClearFilter, list, query, onQuery, archived, onArchived, currentId, onOpen, onNew, onRename, onArchive, onDelete }) {
+    useNow(30000); // keeps the "5 min" labels moving
     const [searching, setSearching] = useState(false);
     const searchBox = useRef(null);
     const several = (agents?.length ?? 0) > 1; // a person with one assistant has nothing to choose, so the section is hidden
@@ -40,7 +42,7 @@ export default function ChatPanel({ agents, picked, filter, onPick, onClearFilte
                     <div className="cw-agents" role="group" aria-label="Assistants">
                         {agents.map((a) => (
                             <button key={a.id} type="button" className={`cw-ag ${picked === a.id ? 'on' : ''}`} aria-pressed={picked === a.id} onClick={() => onPick(a.id)}>
-                                <span className={`cw-av ${hue(agents, a.id)}`} aria-hidden="true">{initial(a.name)}</span>
+                                <AgentAvatar agent={a} agents={agents} />
                                 <span className="t"><b>{a.name}</b>{a.description && <small>{a.description}</small>}</span>
                                 {counts && <span className="n" aria-label={`${counts[a.id] ?? 0} chats`}>{counts[a.id] ?? 0}</span>}
                             </button>
