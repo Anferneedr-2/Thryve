@@ -118,6 +118,38 @@ After a restore, sign in, open **Settings > Health** and confirm every line is g
 - After each scheduled run, nightly backups older than 14 days are removed here and on the off-server disk, and update backups
   older than 30 days are removed here (never the one an unfinished or failed update still needs).
 
+## Moving a chatbot's chats to another device
+
+Used to bring the conversations of one chatbot (for example the General AI Assistant) to another installation of the platform,
+without replacing anything that is already there. It does not use the full backup, so nothing on the receiving side is overwritten.
+
+**On the device that has the chats**
+
+```
+php artisan thryve:export-chats --users=superadmin,Robi
+```
+
+This writes `storage/app/transfer/general-chats.json`: the conversations, messages, ratings, replaced-answer history and attached
+files of the chosen people with the General AI Assistant (`--agent=...` picks another chatbot). Deleted chats are left out. It never
+contains passwords, access keys or usage records. The file is private conversation text: that folder is ignored by git, so it
+cannot be committed by accident, and it should only be copied to your own device (USB drive, private cloud folder).
+
+**On the other device**
+
+1. Have the same code (a `git pull` of the version that includes the transfer migration) and make sure the people in the file exist
+   there with the same usernames. Nobody is created by the import.
+2. Copy `general-chats.json` into `storage/app/transfer/` (create the folder if needed).
+3. Run `php artisan migrate`. The migration `2026_11_20_120000_import_transferred_general_chats` finds the file and imports it. On a
+   server with no terminal it runs in the database wizard, so upload the file to `storage/app/transfer/` first (cPanel File Manager).
+4. People who did not exist yet are listed in the log (`storage/logs/laravel.log`) and skipped. Create them, then run
+   `php artisan thryve:import-chats` (also the way to import when the file arrived after the migration ran). `--dry-run` shows what
+   would happen. Importing is safe to repeat: a conversation that is already there is recognised and left alone.
+
+**The chatbot itself.** If the other device has no chatbot with the same short name, one is created with the same name, address and
+profile but **without access keys** (keys are secrets and are never copied). Its chats are readable, but it cannot answer until you
+open Agents there and create its keys. A Hermes profile accepts one key at a time, so if both devices should talk to the same
+Hermes profile, give the second device its own profile, or expect to reinstall the key on whichever device you rotate it from.
+
 ## Known limits
 
 - **Windows development machines:** a running `php artisan serve` keeps `artisan` locked, so an update that replaces the
