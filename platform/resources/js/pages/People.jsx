@@ -7,7 +7,7 @@ import { Button } from '../components/ui/Button';
 import { Checkbox, SelectField, TextField } from '../components/ui/Form';
 import { Alert, EmptyState, ErrorState, Pill, Skeleton, useToast } from '../components/ui/Feedback';
 import { ConfirmDialog, Dialog, Menu } from '../components/ui/Overlay';
-import { ROLE_LABEL } from '../components/AppLayout';
+import { ROLE_LABEL } from '../lib/roles';
 
 const fieldErrors = (err) => Object.fromEntries(Object.entries(err.details ?? {}).map(([k, v]) => [k, v[0]]));
 

@@ -5,7 +5,7 @@ import { Card } from '../components/ui/Layout';
 import { Button } from '../components/ui/Button';
 import { TextField } from '../components/ui/Form';
 import { Alert, Pill, useToast } from '../components/ui/Feedback';
-import { ROLE_LABEL } from '../components/AppLayout';
+import { ROLE_LABEL } from '../lib/roles';
 
 const EMPTY = { current_password: '', password: '', password_confirmation: '' };
 

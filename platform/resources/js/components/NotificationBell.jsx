@@ -5,6 +5,7 @@ import { useAttendanceStatus } from '../lib/heartbeat';
 import { formatDateTime } from '../lib/util';
 import Icon from './Icon';
 import { Button } from './ui/Button';
+import { popupPosition } from './ui/Overlay';
 import { EmptyState, ErrorState, Skeleton } from './ui/Feedback';
 
 function ago(iso) {
@@ -16,7 +17,8 @@ function ago(iso) {
 }
 
 // Bell with an unread badge and a list. The count arrives with every attendance heartbeat, so it stays fresh without extra requests.
-export default function NotificationBell() {
+// placement and triggerClass let the shell put the bell in the left rail or the phone tab bar; caption is the small label under the icon there.
+export default function NotificationBell({ placement = 'below-end', triggerClass = 'sl-iconbtn round', caption = null }) {
     const { unread: fromServer } = useAttendanceStatus();
     const [unread, setUnread] = useState(fromServer);
     const [open, setOpen] = useState(false);
@@ -36,10 +38,13 @@ export default function NotificationBell() {
 
     const toggle = () => {
         if (!open) {
-            const r = trigger.current.getBoundingClientRect();
-            // Line the list up under the bell, but never let it run off the left edge on a phone.
-            const width = Math.min(360, window.innerWidth - 16);
-            setPos({ top: r.bottom + 6, right: Math.min(Math.max(8, window.innerWidth - r.right), Math.max(8, window.innerWidth - width - 8)) });
+            const p = popupPosition(trigger.current.getBoundingClientRect(), placement);
+            // Never let the list run off the left edge on a phone.
+            if (p.right !== undefined) {
+                const width = Math.min(360, window.innerWidth - 16);
+                p.right = Math.min(p.right, Math.max(8, window.innerWidth - width - 8));
+            }
+            setPos(p);
             load();
         }
         setOpen(!open);
@@ -69,8 +74,9 @@ export default function NotificationBell() {
     const label = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications';
     return (
         <div ref={wrap} style={{ position: 'relative', display: 'inline-block' }}>
-            <button ref={trigger} type="button" className="sl-iconbtn round" aria-label={label} title="Notifications" aria-haspopup="dialog" aria-expanded={open} onClick={toggle} style={{ position: 'relative' }}>
+            <button ref={trigger} type="button" className={triggerClass} aria-label={label} title="Notifications" aria-haspopup="dialog" aria-expanded={open} onClick={toggle} style={{ position: 'relative' }}>
                 <Icon name="bell" />
+                {caption && <span className="cap">{caption}</span>}
                 {unread > 0 && (
                     <span aria-hidden="true" className="tnum" style={{ position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 99, background: 'var(--brand)', color: '#fff', font: '700 11px/18px var(--font-body)', textAlign: 'center' }}>
                         {unread > 99 ? '99+' : unread}
@@ -79,7 +85,7 @@ export default function NotificationBell() {
             </button>
             {open && createPortal(
                 // Rendered on the page itself: inside the blurred navigation bar, "fixed" would be measured from the bar, not the screen.
-                <div ref={pop} role="dialog" aria-label="Notifications" className="sl-menu" style={{ position: 'fixed', top: pos.top, right: pos.right, zIndex: 40, width: 'min(360px, calc(100vw - 16px))', maxHeight: 'min(480px, 70vh)', overflowY: 'auto', padding: 0 }}>
+                <div ref={pop} role="dialog" aria-label="Notifications" className="sl-menu" style={{ position: 'fixed', ...pos, zIndex: 40, width: 'min(360px, calc(100vw - 16px))', maxHeight: 'min(480px, 70vh)', overflowY: 'auto', padding: 0 }}>
                     <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--slate-200)' }}>
                         <strong className="font-display text-base" style={{ color: 'var(--sl-heading)' }}>Notifications</strong>
                         <Button variant="ghost" size="sm" className="ml-auto" disabled={unread === 0} onClick={markAll}>Mark all as read</Button>

@@ -26,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Maintenance runs first, before sessions or the database are touched; its bypass cookie must stay readable as plain text.
         $middleware->prepend(\App\Http\Middleware\CheckMaintenance::class);
         $middleware->encryptCookies(except: [\App\Updates\Maintenance::COOKIE]);
+        // Behind a tunnel/proxy (e.g. Cloudflare) the request arrives over http; trust X-Forwarded-Proto so URLs and assets stay https.
+        $middleware->trustProxies(at: '*');
         $middleware->alias([
             'installed' => \App\Http\Middleware\EnsureInstalled::class,
             'not-installed' => \App\Http\Middleware\EnsureNotInstalled::class,

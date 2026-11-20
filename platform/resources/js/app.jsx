@@ -1,4 +1,5 @@
 import '../css/app.css';
+import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthProvider, useAuth } from './lib/auth';
 import { RouterProvider, useRouter } from './lib/router';
@@ -7,14 +8,13 @@ import { ToastProvider } from './components/ui/Feedback';
 import { Skeleton } from './components/ui/Feedback';
 import { Card } from './components/ui/Layout';
 import { Button } from './components/ui/Button';
-import AppLayout from './components/AppLayout';
+import WorkspaceShell from './components/shell/WorkspaceShell';
 import Account from './pages/Account';
 import Attendance from './pages/Attendance';
 import TeamAttendance from './pages/TeamAttendance';
 import ComponentGallery from './pages/ComponentGallery';
 import Chat from './pages/Chat';
 import Departments from './pages/Departments';
-import Home from './pages/Home';
 import Settings from './pages/Settings';
 import System from './pages/System';
 import InstallWizard from './pages/InstallWizard';
@@ -31,20 +31,23 @@ function Screen() {
     const { user } = useAuth();
     const isAdmin = user.role === 'admin' || user.role === 'super_admin';
 
+    // Chat is the home screen: the old Home page is gone.
+    useEffect(() => { if (path === '/') navigate('/chat', { replace: true }); }, [path, navigate]);
+    if (path === '/') return null;
+
     if (path === '/people' && isAdmin) return <People />;
     if (path === '/departments' && isAdmin) return <Departments />;
     if (path === '/agents' && isAdmin) return <AiAgents />;
     if (path === '/team-attendance' && isAdmin) return <TeamAttendance />;
     if (path === '/settings' && user.role === 'super_admin') return <Settings />;
     if (path === '/system' && user.role === 'super_admin') return <System />;
-    if (path === '/chat') return <Chat />;
+    if (path === '/chat' || path.startsWith('/chat/')) return <Chat />;
     if (path === '/attendance') return <Attendance />;
     if (path === '/account') return <Account />;
-    if (path === '/') return <Home />;
     return (
         <Card title={ADMIN_ONLY.has(path) ? 'You do not have access to this page' : 'Page not found'}>
             <p>{ADMIN_ONLY.has(path) ? 'Ask a Super Admin if you need it.' : 'The page you asked for does not exist.'}</p>
-            <div><Button variant="soft" size="sm" onClick={() => navigate('/')}>Go to Home</Button></div>
+            <div><Button variant="soft" size="sm" onClick={() => navigate('/chat')}>Go to chat</Button></div>
         </Card>
     );
 }
@@ -60,7 +63,7 @@ function Gate() {
     if (status === 'loading') return <main className="mx-auto max-w-[440px] px-6 py-20"><Skeleton lines={4} /></main>;
     if (status === 'guest') return <Login />;
     if (!user.policy_acknowledged) return <PolicyAck />;
-    return <AppLayout><Screen /></AppLayout>;
+    return <WorkspaceShell><Screen /></WorkspaceShell>;
 }
 
 function App() {

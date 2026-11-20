@@ -34,7 +34,17 @@ export function ConfirmDialog({ open, onCancel, onConfirm, title, children, conf
 }
 
 // Menu button + popup. Arrow keys move, Esc closes and returns focus, outside click closes.
-export function Menu({ label, icon = 'more', items }) {
+// placement: 'below-end' (default, under the button, right edges aligned), 'right-end' (to the right of the button, bottoms
+// aligned: for the left rail) or 'above-end' (above the button: for the phone tab bar). triggerClass / triggerContent let
+// the shell restyle the button (avatar, rail icon with a caption) without a second menu component.
+export function popupPosition(rect, placement) {
+    if (placement === 'right-end') return { left: rect.right + 10, bottom: Math.max(8, window.innerHeight - rect.bottom) };
+    if (placement === 'above-end') return { bottom: window.innerHeight - rect.top + 8, right: Math.max(8, window.innerWidth - rect.right) };
+
+    return { top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) };
+}
+
+export function Menu({ label, icon = 'more', items, placement = 'below-end', triggerClass = 'sl-iconbtn', triggerContent = null }) {
     const [open, setOpen] = useState(false);
     const [pos, setPos] = useState({ top: 0, right: 0 });
     const wrap = useRef(null);
@@ -43,8 +53,7 @@ export function Menu({ label, icon = 'more', items }) {
     const toggle = () => {
         if (!open) {
             // Fixed positioning lets the popup escape scrolling table wrappers and clipped cards.
-            const r = trigger.current.getBoundingClientRect();
-            setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+            setPos(popupPosition(trigger.current.getBoundingClientRect(), placement));
         }
         setOpen(!open);
     };
@@ -71,12 +80,12 @@ export function Menu({ label, icon = 'more', items }) {
     };
     return (
         <div ref={wrap} style={{ position: 'relative', display: 'inline-block' }} onKeyDown={open ? onKey : undefined}>
-            <button ref={trigger} type="button" className="sl-iconbtn" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
-                <Icon name={icon} />
+            <button ref={trigger} type="button" className={triggerClass} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
+                {triggerContent ?? <Icon name={icon} />}
             </button>
             {open && createPortal(
                 // Rendered on the page itself: the navigation bar blurs its background, which would otherwise make "fixed" mean "inside the bar".
-                <div ref={pop} className="sl-menu" role="menu" style={{ position: 'fixed', right: pos.right, top: pos.top, zIndex: 40 }}>
+                <div ref={pop} className="sl-menu" role="menu" style={{ position: 'fixed', ...pos, zIndex: 40 }}>
                     {items.map((it, i) => it === '-' ? <hr key={i} /> : (
                         <button key={it.label} type="button" role="menuitem" className={`it ${it.danger ? 'danger' : ''}`} onClick={() => { setOpen(false); trigger.current.focus(); it.onSelect?.(); }}>
                             {it.icon && <Icon name={it.icon} />}{it.label}

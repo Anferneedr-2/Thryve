@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 @import './tokens.css';
 @import './components.css';
+@import './shell.css';
+@import './chat.css';
 
 @source '../../storage/framework/views/*.php';
 
