@@ -27,14 +27,16 @@ export default function ChatPanel({ agents, picked, filter, onPick, onClearFilte
 
     return (
         <div className="pin">
-            <button type="button" className="sl-btn primary cw-new" onClick={() => onNew()}>
-                <Icon name="plus" />
-                <span className="lbl"><b>New chat</b>{several && pickedAgent && <small>with {pickedAgent.name}</small>}</span>
-            </button>
+            <div className="cw-sec cw-top">
+                <span>{several ? 'Assistants' : 'Chats'}</span>
+                <button type="button" className="sl-btn primary cw-new" title={several && pickedAgent ? `New chat with ${pickedAgent.name}` : undefined} onClick={() => onNew()}>
+                    <Icon name="plus" />
+                    <span>New chat</span>
+                </button>
+            </div>
 
             {several && (
                 <>
-                    <div className="cw-sec">Assistants</div>
                     <div className="cw-agents" role="group" aria-label="Assistants">
                         {agents.map((a) => (
                             <button key={a.id} type="button" className={`cw-ag ${picked === a.id ? 'on' : ''}`} aria-pressed={picked === a.id} onClick={() => onPick(a.id)}>

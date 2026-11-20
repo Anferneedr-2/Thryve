@@ -1,5 +1,5 @@
 import Icon from '../Icon';
-import { Button, IconButton } from '../ui/Button';
+import { IconButton } from '../ui/Button';
 import { Markdown } from '../../lib/markdown';
 import { sizeText } from './chatUtil';
 
@@ -12,14 +12,16 @@ export default function Messages({ messages, busy, pendingText, editing, setEdit
             {messages.map((m, i) => (
                 <li key={m.id} className={`m ${m.role === 'user' ? 'user' : 'ai'}`}>
                     {editing?.id === m.id ? (
-                        <div className="m-edit">
-                            <textarea className="sl-textarea" aria-label="Edit your message" value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} />
-                            <div className="m-acts">
-                                <Button size="sm" variant="primary" disabled={!editing.text.trim() || busy} onClick={saveEdit}>Save and resend</Button>
-                                <Button size="sm" onClick={() => setEditing(null)}>Cancel</Button>
+                        <>
+                            <div className="m-edit">
+                                <textarea aria-label="Edit your message" autoFocus value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} />
                             </div>
-                            <p className="m-note">Messages after this one are replaced, and the new answer uses tokens again.</p>
-                        </div>
+                            <div className="m-edit-bar">
+                                <p className="m-note">Messages after this one are replaced, and the new answer uses tokens again.</p>
+                                <button type="button" className="m-eb" aria-label="Cancel editing" title="Cancel" onClick={() => setEditing(null)}><Icon name="x" /></button>
+                                <button type="button" className="m-eb go" aria-label="Save and resend" title="Save and resend" disabled={!editing.text.trim() || busy} onClick={saveEdit}><Icon name="check" /></button>
+                            </div>
+                        </>
                     ) : m.role === 'user' ? (
                         <div className="bubble">{m.content}</div>
                     ) : (

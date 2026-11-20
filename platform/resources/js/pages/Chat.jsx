@@ -185,6 +185,32 @@ export default function Chat() {
         run((signal, ack) => postJson(`/conversations/${current.id}/messages/${id}`, 'PATCH', { message: text, acknowledge_sensitive: ack || undefined }, signal));
     };
     const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } };
+    // ---- speech to text (the browser's built-in recognition; the button is hidden where it is not available) ----------
+    const Speech = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+    const rec = useRef(null);
+    const [listening, setListening] = useState(false);
+    const stopListening = useCallback(() => { try { rec.current?.stop(); } catch { /* already stopped */ } }, []);
+    const toggleListening = () => {
+        if (listening) { stopListening(); return; }
+        const r = new Speech();
+        r.lang = navigator.language || 'en-US';
+        r.interimResults = true;
+        r.continuous = true;
+        const base = draft ? `${draft.replace(/\s+$/, '')} ` : '';
+        r.onresult = (e) => {
+            const said = Array.from(e.results).map((x) => x[0].transcript).join('').trim();
+            setDraft((base + said).slice(0, 20000));
+            if (box.current) { box.current.style.height = 'auto'; box.current.style.height = `${Math.min(box.current.scrollHeight, 180)}px`; }
+        };
+        r.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Microphone access was blocked. Allow it in the browser to dictate.'); else if (e.error !== 'no-speech' && e.error !== 'aborted') toast('Voice typing stopped. Try again.'); };
+        r.onend = () => { setListening(false); rec.current = null; };
+        rec.current = r;
+        try { r.start(); setListening(true); box.current?.focus(); } catch { rec.current = null; }
+    };
+    useEffect(() => stopListening, [stopListening]);
+    useEffect(() => { if (busy) stopListening(); }, [busy, stopListening]);
+    // The box stretches while typing; once the draft is cleared (sent), shrink it back.
+    useEffect(() => { if (!draft && box.current) box.current.style.height = ''; }, [draft]);
     const grow = (el) => { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; };
     const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { toast('Copy was blocked by the browser.'); } };
     const rate = async (m, value) => {
@@ -316,6 +342,10 @@ export default function Chat() {
                             <button type="button" className="cw-tgl" aria-label="Attach files" disabled={busy || blocked} onClick={() => pickerRef.current?.click()}><Icon name="clip" /></button>
                             {several && !current && agent && <span className="cw-chip on">{dots(agent.id)}{agent.name}</span>}
                             <span className="hint">Enter to send, Shift+Enter for a new line</span>
+                            {Speech && (
+                                <button type="button" className={`cw-tgl cw-mic ${listening ? 'on' : ''}`} aria-label={listening ? 'Stop voice typing' : 'Start voice typing'} aria-pressed={listening}
+                                    disabled={busy || blocked} onClick={toggleListening}><Icon name="mic" /></button>
+                            )}
                             {busy
                                 ? <button type="button" className="cw-send stop" aria-label="Stop" onClick={stop}><Icon name="stop" /></button>
                                 : <button type="button" className="cw-send" aria-label="Send" disabled={!draft.trim() || blocked || uploading} onClick={() => submit()}><Icon name="up" /></button>}
