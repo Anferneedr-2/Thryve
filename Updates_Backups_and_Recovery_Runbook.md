@@ -145,10 +145,21 @@ cannot be committed by accident, and it should only be copied to your own device
    `php artisan thryve:import-chats` (also the way to import when the file arrived after the migration ran). `--dry-run` shows what
    would happen. Importing is safe to repeat: a conversation that is already there is recognised and left alone.
 
-**The chatbot itself.** If the other device has no chatbot with the same short name, one is created with the same name, address and
-profile but **without access keys** (keys are secrets and are never copied). Its chats are readable, but it cannot answer until you
-open Agents there and create its keys. A Hermes profile accepts one key at a time, so if both devices should talk to the same
-Hermes profile, give the second device its own profile, or expect to reinstall the key on whichever device you rotate it from.
+**The chatbot itself, and its access key.** If the other device has no chatbot with the same short name, importing the chats creates one with
+the same name, address and profile but **without an access key**: keys are secrets, so they are never inside the chat file, and never in
+git. The chats are readable, but the chatbot cannot answer until it has a key. There are two ways to give it one:
+
+- *Bring the same key* (so both devices use the same Hermes profile, nothing to change on the server). On the device that has the key,
+  run `php artisan thryve:export-agent-key` and type a passphrase of your own twice (at least 10 characters, shown nowhere). It writes
+  `storage/app/transfer/general-ai-assistant.key.json`, an AES-256-GCM encrypted file that is useless without the passphrase; the
+  command prints only the last 8 characters (fingerprint) of the key. Copy that file to the other device's `storage/app/transfer/`,
+  import the chats first (that creates the chatbot), then run `php artisan thryve:import-agent-key`, type the same passphrase, and compare the fingerprint
+  with the one printed by the export. Open Agents and press **Test connection**. Send the passphrase by a different route than the file.
+  A different key already on the chatbot is only replaced with `--replace`.
+- *Make a new key* for that device in Agents. A Hermes profile accepts one key at a time, so this means a separate Hermes profile for the
+  second device, or reinstalling the new key on the server (which stops the first device's key until it is updated too).
+
+Whichever way: **rotating the key on one device breaks the other** until the new key is brought across again.
 
 ## Known limits
 
