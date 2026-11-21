@@ -14,15 +14,16 @@
 /.zed
 /auth.json
 /node_modules
-/public/build
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
 /storage/*.key
 /storage/pail
-/vendor
 _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
 .env.bak*
+
+# Built files are committed on purpose: the host has no terminal, so nothing can be built there.
+# vendor/ holds production packages only (composer install --no-dev --optimize-autoloader).
