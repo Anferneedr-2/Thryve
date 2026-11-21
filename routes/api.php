@@ -118,6 +118,9 @@ Route::middleware(['web', 'installed'])->group(function () {
             Route::post('/settings/smtp-test', [SettingsController::class, 'smtpTest'])->middleware('throttle:10,1');
             Route::post('/settings/branding', [BrandingController::class, 'upload']);
             Route::delete('/settings/branding/{kind}', [BrandingController::class, 'destroy']);
+            Route::get('/settings/transfer', [\App\Http\Controllers\TransferController::class, 'show']);
+            Route::post('/settings/transfer/chats', [\App\Http\Controllers\TransferController::class, 'chats'])->middleware('throttle:transfer-chats');
+            Route::post('/settings/transfer/key', [\App\Http\Controllers\TransferController::class, 'key'])->middleware('throttle:transfer-key');
             Route::post('/agents', [\App\Http\Controllers\AgentController::class, 'store']);
             Route::post('/agents/{id}/avatar', [\App\Http\Controllers\AgentAvatarController::class, 'upload'])->whereNumber('id');
             Route::delete('/agents/{id}/avatar', [\App\Http\Controllers\AgentAvatarController::class, 'destroy'])->whereNumber('id');

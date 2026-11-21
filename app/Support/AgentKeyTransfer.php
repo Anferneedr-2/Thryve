@@ -53,6 +53,33 @@ final class AgentKeyTransfer
         return ['agent' => $file['agent'], 'fingerprint' => $file['fingerprint'], 'key' => $key];
     }
 
+    /**
+     * Opens a key file and sets the key on the chatbot of the same short name. Used by the web page (no terminal needed).
+     *
+     * @return array{result: string, agent: string, fingerprint: string} result is "set" or "same"
+     */
+    public static function install(array $file, string $passphrase, bool $replace = false, ?\App\Models\User $by = null): array
+    {
+        $agent = \App\Models\Agent::active()->where('slug', (string) ($file['agent'] ?? ''))->first();
+        if (! $agent) {
+            throw new InvalidArgumentException('This chatbot is not here yet. Import its chats first: that creates it. Then bring the key.');
+        }
+        if ($agent->outbound_key && $agent->outbound_fingerprint !== ($file['fingerprint'] ?? null) && ! $replace) {
+            throw new InvalidArgumentException("{$agent->name} already has a different key (ends in {$agent->outbound_fingerprint}). Tick \"Replace the key it has\" if you really want to swap it.");
+        }
+        $opened = self::open($file, $passphrase);
+        if ($agent->outbound_key && $agent->outbound_fingerprint === $opened['fingerprint']) {
+            return ['result' => 'same', 'agent' => $agent->name, 'fingerprint' => $opened['fingerprint']];
+        }
+        $agent->update([
+            'outbound_key' => $opened['key'], 'outbound_fingerprint' => $opened['fingerprint'], 'pending_key' => null, 'pending_fingerprint' => null,
+            'status' => 'never_tested', 'last_checked_at' => null, 'last_latency_ms' => null,
+        ]);
+        Audit::log('agent.key_imported', $by, null, ['agent_id' => $agent->id, 'fingerprint' => $opened['fingerprint']]); // the fingerprint only, never the key
+
+        return ['result' => 'set', 'agent' => $agent->name, 'fingerprint' => $opened['fingerprint']];
+    }
+
     private static function derive(string $passphrase, string $salt, int $rounds = self::ROUNDS): string
     {
         return hash_pbkdf2('sha256', $passphrase, $salt, $rounds, 32, true);

@@ -3,6 +3,7 @@ import SideNavLayout from '../components/shell/SideNavLayout';
 import Settings from './Settings';
 import { Health } from './System';
 import Updates from './Updates';
+import Transfer from './Transfer';
 
 // Super Admin: every settings group is its own page, listed in the left drawer. The bare /settings address is General.
 export const SETTINGS_ITEMS = [
@@ -15,6 +16,7 @@ export const SETTINGS_ITEMS = [
     { id: 'email', path: '/settings/email', label: 'Email', description: 'Mail server for alerts', icon: 'mail', group: 'Rules' },
     { id: 'health', path: '/settings/health', label: 'Health', description: 'Live checks of the platform', icon: 'globe', group: 'System' },
     { id: 'updates', path: '/settings/updates', label: 'Updates and backups', description: 'Version, updates and rollback', icon: 'download', group: 'System' },
+    { id: 'transfer', path: '/settings/transfer', label: 'Move chats', description: 'Bring a chatbot from another device', icon: 'file', group: 'System' },
 ];
 
 export default function SettingsArea() {
@@ -22,7 +24,7 @@ export default function SettingsArea() {
     const item = SETTINGS_ITEMS.find((i) => i.path === path) ?? SETTINGS_ITEMS[0];
     return (
         <SideNavLayout title="Settings" items={SETTINGS_ITEMS} current={item.id}>
-            {item.id === 'health' ? <Health /> : item.id === 'updates' ? <Updates /> : <Settings section={item.id} />}
+            {item.id === 'health' ? <Health /> : item.id === 'updates' ? <Updates /> : item.id === 'transfer' ? <Transfer /> : <Settings section={item.id} />}
         </SideNavLayout>
     );
 }
