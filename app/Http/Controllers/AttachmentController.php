@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Ai\FileReader;
+use App\Ai\GeneratedFiles;
 use App\Http\Responses\Api;
 use App\Models\Attachment;
 use App\Support\Settings;
@@ -24,6 +25,9 @@ class AttachmentController extends Controller
             'max_count' => (int) Settings::get('file_max_count'),
             'max_mb' => (int) Settings::get('file_max_mb'),
             'types' => FileReader::KINDS,
+            'image_max_mb' => 4,
+            'pdf_max_mb' => 8,
+            'output_formats' => GeneratedFiles::FORMATS,
         ]);
     }
 
@@ -45,7 +49,7 @@ class AttachmentController extends Controller
         }
         $kind = FileReader::kindFor($file->getClientOriginalName());
         if (! $kind) {
-            return Api::error('file_type_not_allowed', 'This file type is not supported yet. You can attach text, Markdown, CSV, Word (.docx) and Excel (.xlsx) files.', 422);
+            return Api::error('file_type_not_allowed', 'Attach TXT, Markdown, CSV, DOCX, XLSX, text-based PDF, PNG or JPEG files.', 422);
         }
 
         try {
@@ -95,6 +99,14 @@ class AttachmentController extends Controller
 
     public static function present(Attachment $a): array
     {
-        return ['id' => $a->id, 'name' => $a->original_name, 'kind' => $a->kind, 'size' => (int) $a->size, 'truncated' => $a->truncated];
+        $mime = match ($a->kind) {
+            'pdf' => 'application/pdf', 'png' => 'image/png', 'jpg', 'jpeg' => 'image/jpeg',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'csv' => 'text/csv', 'md' => 'text/markdown', default => 'text/plain',
+        };
+
+        return ['id' => $a->id, 'name' => $a->original_name, 'kind' => $a->kind, 'mime_type' => $mime, 'size' => (int) $a->size, 'truncated' => $a->truncated, 'generated' => $a->generated];
     }
 }

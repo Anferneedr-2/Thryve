@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Ai\ChatService;
 use App\Ai\AgentUnavailable;
+use App\Ai\ChatService;
+use App\Ai\FileGenerationFailed;
+use App\Ai\GeneratedFiles;
 use App\Ai\ProviderException;
 use App\Ai\TokenLimitReached;
 use App\Http\Responses\Api;
@@ -12,9 +14,11 @@ use App\Models\Attachment;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
+use App\Support\AgentAvatar;
 use App\Support\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 /** Private conversations: every query is scoped to the signed-in person, and another person's id looks like "not found". */
 class ChatController extends Controller
@@ -30,7 +34,7 @@ class ChatController extends Controller
     public function agents(Request $request): JsonResponse
     {
         return Api::ok(Agent::availableTo($request->user())->orderByDesc('is_default')->orderBy('name')->get()
-            ->map(fn ($a) => ['id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default, 'avatar' => \App\Support\AgentAvatar::url($a->id)])->values());
+            ->map(fn ($a) => ['id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default, 'avatar' => AgentAvatar::url($a->id)])->values());
     }
 
     public function index(Request $request): JsonResponse
@@ -64,6 +68,7 @@ class ChatController extends Controller
             'acknowledge_sensitive' => ['nullable', 'boolean'],
             'attachment_ids' => ['nullable', 'array'],
             'attachment_ids.*' => ['integer'],
+            'output_format' => ['nullable', 'in:'.implode(',', GeneratedFiles::FORMATS)],
         ]);
         $text = trim($d['message']);
         if ($text === '') {
@@ -90,7 +95,7 @@ class ChatController extends Controller
             }
             $c = $this->chat->start($user, $agent, $text);
         }
-        $this->chat->addUserMessage($c, $text, $files);
+        $this->chat->addUserMessage($c, $text, $files, $d['output_format'] ?? null);
 
         return $this->respond($request, $c);
     }
@@ -127,7 +132,7 @@ class ChatController extends Controller
             return $blocked;
         }
         $this->chat->supersedeFrom($c, $original);
-        $new = $this->chat->addUserMessage($c, $text);
+        $new = $this->chat->addUserMessage($c, $text, [], $original->output_format);
         $this->chat->carryFiles($original, $new);
 
         return $this->respond($request, $c);
@@ -199,7 +204,7 @@ class ChatController extends Controller
     }
 
     /** Files named in a send must be this person's own, unsent, and within the per-message limit. */
-    private function files(Request $request, array $ids): \Illuminate\Support\Collection|JsonResponse
+    private function files(Request $request, array $ids): Collection|JsonResponse
     {
         $ids = array_values(array_unique($ids));
         $max = (int) Settings::get('file_max_count');
@@ -209,6 +214,9 @@ class ChatController extends Controller
         $files = Attachment::where('user_id', $request->user()->id)->whereNull('message_id')->whereIn('id', $ids)->get();
         if ($files->count() !== count($ids)) {
             return Api::error('file_not_found', 'One of the attached files is no longer available. Remove it and attach it again.', 422);
+        }
+        if ($files->whereIn('kind', ['png', 'jpg', 'jpeg'])->sum('size') > 6 * 1024 * 1024) {
+            return Api::error('images_too_large', 'Attach no more than 6 MB of images per message. Use smaller images.', 422);
         }
 
         return $files;
@@ -236,6 +244,8 @@ class ChatController extends Controller
         $base = ['conversation' => $this->summary($c)];
         try {
             $reply = $this->chat->answer($request->user(), $c);
+        } catch (FileGenerationFailed $e) {
+            return Api::error('file_generation_failed', $e->getMessage().' Your message is saved; generation may have used tokens.', 502, $base);
         } catch (TokenLimitReached $e) {
             return Api::error('token_limit', $e->getMessage(), 429, $base);
         } catch (AgentUnavailable) {
@@ -244,6 +254,7 @@ class ChatController extends Controller
             $msg = match ($e->category) {
                 'timeout' => 'The assistant is taking too long. It may still finish: check this conversation again in a minute before sending the message twice.',
                 'bad_request' => 'The assistant could not handle this message. Try rephrasing it.',
+                'image_budget' => 'Images in this conversation exceed the 6 MB request limit. Use smaller images in a new conversation.',
                 default => 'The assistant could not answer. Your message is saved: try again.',
             };
 
@@ -256,7 +267,7 @@ class ChatController extends Controller
     private function summary(Conversation $c): array
     {
         return ['id' => $c->id, 'title' => $c->title, 'archived' => $c->archived_at !== null, 'last_message_at' => $c->last_message_at?->toIso8601String(),
-            'agent' => $c->agent ? ['id' => $c->agent->id, 'name' => $c->agent->name, 'avatar' => \App\Support\AgentAvatar::url($c->agent->id)] : null];
+            'agent' => $c->agent ? ['id' => $c->agent->id, 'name' => $c->agent->name, 'avatar' => AgentAvatar::url($c->agent->id)] : null];
     }
 
     private function message(Message $m): array

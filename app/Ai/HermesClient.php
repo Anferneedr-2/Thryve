@@ -21,7 +21,7 @@ class HermesClient
 
     /**
      * @return array{ok: bool, category: string, status: int|null}
-     *   category: ok | unauthorized | rate_limited | unavailable | timeout | not_configured
+     *                                                             category: ok | unauthorized | rate_limited | unavailable | timeout | not_configured
      */
     public function ping(): array
     {
@@ -57,7 +57,7 @@ class HermesClient
      * so it tells "unreachable" from "key rejected" from "profile not found".
      *
      * @return array{ok: bool, category: string, status: int|null, latency_ms: int|null}
-     *   category: ok | unauthorized | profile_missing | rate_limited | unavailable | timeout | bad_response
+     *                                                                                   category: ok | unauthorized | profile_missing | rate_limited | unavailable | timeout | bad_response
      */
     public function probe(string $url, ?string $key, ?string $profile = null): array
     {
@@ -116,7 +116,7 @@ class HermesClient
      *
      * @throws ProviderException
      */
-    public function chat(array $messages, ?array $target = null): array
+    public function chat(array $messages, ?array $target = null, ?string $sessionId = null): array
     {
         // The caller names the agent to talk to. With no agent at all, the old .env settings still work.
         if ($target === null && (app(AgentService::class)->any() || ! $this->configured())) {
@@ -131,6 +131,9 @@ class HermesClient
             $request = Http::timeout((int) config('services.hermes.timeout'))->connectTimeout(5)->withoutRedirecting()->acceptJson();
             if ($key) {
                 $request = $request->withToken($key);
+            }
+            if ($sessionId) {
+                $request = $request->withHeaders(['X-Hermes-Session-Id' => $sessionId]);
             }
             $response = $request->post($url, [
                 'model' => $model,

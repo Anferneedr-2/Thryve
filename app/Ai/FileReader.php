@@ -6,12 +6,11 @@ use ZipArchive;
 
 /**
  * Checks that an uploaded file really is what its name says and pulls the text out of it, on our own server,
- * so Hermes receives plain text over the already verified chat contract. PDF and images need a file-transfer
- * contract that is not confirmed yet (decision D04) and are refused for now.
+ * so Hermes receives document text or validated inline images through the chat API.
  */
 final class FileReader
 {
-    public const KINDS = ['txt', 'md', 'csv', 'docx', 'xlsx'];
+    public const KINDS = ['txt', 'md', 'csv', 'docx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg'];
 
     /** Characters kept per file; the rest is dropped and the file is flagged as truncated. */
     public const MAX_CHARS = 40000;
@@ -34,10 +33,20 @@ final class FileReader
      */
     public static function read(string $path, string $kind): array
     {
+        if (in_array($kind, ['png', 'jpg', 'jpeg'], true)) {
+            $info = @getimagesize($path);
+            $expected = $kind === 'png' ? IMAGETYPE_PNG : IMAGETYPE_JPEG;
+            if (! $info || $info[2] !== $expected || $info[0] * $info[1] > 16000000 || filesize($path) > 4 * 1024 * 1024) {
+                throw new \InvalidArgumentException('Use a valid PNG or JPEG image up to 4 MB and 16 megapixels.');
+            }
+
+            return ['text' => '', 'truncated' => false];
+        }
         $text = match ($kind) {
             'txt', 'md', 'csv' => self::plain($path),
             'docx' => self::docx($path),
             'xlsx' => self::xlsx($path),
+            'pdf' => self::pdf($path),
         };
         $text = trim($text);
         if ($text === '') {
@@ -46,6 +55,37 @@ final class FileReader
         $truncated = mb_strlen($text) > self::MAX_CHARS;
 
         return ['text' => $truncated ? mb_substr($text, 0, self::MAX_CHARS) : $text, 'truncated' => $truncated];
+    }
+
+    private static function pdf(string $path): string
+    {
+        if (filesize($path) > 8 * 1024 * 1024 || ! str_starts_with(file_get_contents($path, false, null, 0, 5), '%PDF-')) {
+            throw new \InvalidArgumentException('Use a valid text-based PDF up to 8 MB.');
+        }
+        try {
+            $pdf = (new BoundedPdfParser)->parseFile($path);
+            $pages = $pdf->getPages();
+            if (count($pages) > 100) {
+                throw new \RuntimeException;
+            }
+            $text = '';
+            foreach ($pages as $i => $page) {
+                $part = trim($page->getText());
+                if ($part !== '') {
+                    $text .= '\n[Page '.($i + 1)."]\n".$part;
+                }
+                if (mb_strlen($text) > self::MAX_CHARS) {
+                    break;
+                }
+            }
+        } catch (\Throwable) {
+            throw new \InvalidArgumentException('This PDF is encrypted, damaged or too complex. Use an unencrypted text-based PDF up to 100 pages.');
+        }
+        if (trim($text) === '') {
+            throw new \InvalidArgumentException('No readable PDF text was found. Scanned PDFs need OCR; attach a PNG/JPG image or a text-based PDF instead.');
+        }
+
+        return $text;
     }
 
     private static function plain(string $path): string

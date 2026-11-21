@@ -67,8 +67,8 @@ class ChatApiTest extends TestCase
         $id = $this->say($cookie, 'one')->json('data.conversation.id');
         $this->say($cookie, 'two', ['conversation_id' => $id])->assertOk();
 
-        Http::assertSent(fn ($req) => count($req['messages']) === 3
-            && $req['messages'][0]['content'] === 'one' && $req['messages'][1]['content'] === 'First' && $req['messages'][2]['content'] === 'two');
+        Http::assertSent(fn ($req) => count(collect($req['messages'])->where('role', '!=', 'system')->values()->all()) === 3
+            && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'] === 'one' && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[1]['content'] === 'First' && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[2]['content'] === 'two');
     }
 
     public function test_conversations_are_private_to_their_owner(): void
@@ -208,7 +208,7 @@ class ChatApiTest extends TestCase
 
         $this->device($cookie)->getJson("/api/conversations/{$id}")->assertJsonCount(2, 'data.messages')->assertJsonPath('data.messages.0.content', 'first, reworded');
         $this->assertSame(6, Message::where('conversation_id', $id)->count());
-        Http::assertSent(fn ($req) => count($req['messages']) === 1 && $req['messages'][0]['content'] === 'first, reworded');
+        Http::assertSent(fn ($req) => count(collect($req['messages'])->where('role', '!=', 'system')->values()->all()) === 1 && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'] === 'first, reworded');
     }
 
     public function test_only_own_user_messages_can_be_edited_and_only_answers_rated(): void

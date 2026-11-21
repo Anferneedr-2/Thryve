@@ -4,8 +4,11 @@ namespace Tests\Feature;
 
 use App\Ai\FileReader;
 use App\Models\Attachment;
+use App\Models\Conversation;
+use App\Models\Message;
 use App\Models\Role;
 use App\Support\Settings;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -22,7 +25,7 @@ class AttachmentTest extends TestCase
     {
         parent::setUp();
         $this->useDatabaseSessions();
-        $this->seed(\Database\Seeders\RoleSeeder::class);
+        $this->seed(RoleSeeder::class);
         Storage::fake('private');
         config(['services.hermes.url' => 'http://hermes.test/p/bot', 'services.hermes.key' => 'k-1234567890123456']);
     }
@@ -131,7 +134,7 @@ class AttachmentTest extends TestCase
     {
         [, $cookie] = $this->me();
 
-        foreach (['report.pdf', 'photo.png', 'photo.jpg', 'run.exe', 'page.html', 'noext'] as $name) {
+        foreach (['animation.gif', 'slides.pptx', 'run.exe', 'page.html', 'noext'] as $name) {
             $this->upload($cookie, $this->text($name, 'content'))->assertStatus(422)->assertJsonPath('error.code', 'file_type_not_allowed');
         }
     }
@@ -179,8 +182,8 @@ class AttachmentTest extends TestCase
 
         $r = $this->device($cookie)->postJson('/api/chat', ['message' => 'Summarize this', 'attachment_ids' => [$id]])->assertOk();
 
-        Http::assertSent(fn ($req) => str_contains($req['messages'][0]['content'], 'Summarize this')
-            && str_contains($req['messages'][0]['content'], '[Attached file: memo.docx]') && str_contains($req['messages'][0]['content'], 'Budget is 5000'));
+        Http::assertSent(fn ($req) => str_contains(collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'], 'Summarize this')
+            && str_contains(collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'], '[Attached file: memo.docx]') && str_contains(collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'], 'Budget is 5000'));
         $conv = $r->json('data.conversation.id');
         $this->device($cookie)->getJson("/api/conversations/{$conv}")->assertJsonPath('data.messages.0.attachments.0.name', 'memo.docx');
         $a = Attachment::find($id);
@@ -199,11 +202,11 @@ class AttachmentTest extends TestCase
         $conv = $this->device($cookie)->postJson('/api/chat', ['message' => 'read it', 'attachment_ids' => [$id]])->json('data.conversation.id');
 
         $this->device($cookie)->postJson('/api/chat', ['message' => 'and now?', 'conversation_id' => $conv])->assertOk();
-        Http::assertSent(fn ($req) => count($req['messages']) === 3 && str_contains($req['messages'][0]['content'], 'secret-sauce-recipe'));
+        Http::assertSent(fn ($req) => count(collect($req['messages'])->where('role', '!=', 'system')->values()->all()) === 3 && str_contains(collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'], 'secret-sauce-recipe'));
 
-        $first = \App\Models\Message::where('conversation_id', $conv)->where('role', 'user')->orderBy('id')->value('id');
+        $first = Message::where('conversation_id', $conv)->where('role', 'user')->orderBy('id')->value('id');
         $this->device($cookie)->patchJson("/api/conversations/{$conv}/messages/{$first}", ['message' => 'read it again'])->assertOk();
-        Http::assertSent(fn ($req) => count($req['messages']) === 1 && str_contains($req['messages'][0]['content'], 'secret-sauce-recipe') && str_contains($req['messages'][0]['content'], 'read it again'));
+        Http::assertSent(fn ($req) => count(collect($req['messages'])->where('role', '!=', 'system')->values()->all()) === 1 && str_contains(collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'], 'secret-sauce-recipe') && str_contains(collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'], 'read it again'));
     }
 
     public function test_other_peoples_files_cannot_be_attached_downloaded_or_removed(): void
@@ -217,7 +220,7 @@ class AttachmentTest extends TestCase
         $this->device($b)->get("/api/attachments/{$id}/download", ['Accept' => 'application/json'])->assertNotFound();
         $this->device($b)->deleteJson("/api/attachments/{$id}")->assertNotFound();
         Http::assertNothingSent();
-        $this->assertSame(0, \App\Models\Conversation::count(), 'a rejected send creates nothing');
+        $this->assertSame(0, Conversation::count(), 'a rejected send creates nothing');
     }
 
     public function test_download_returns_the_original_bytes_as_an_attachment(): void

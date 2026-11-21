@@ -9,6 +9,7 @@ use App\Models\Message;
 use App\Models\User;
 use App\Support\BusinessDay;
 use App\Support\Settings;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -34,9 +35,9 @@ class ChatService
     }
 
     /** @param  iterable<Attachment>  $files  already checked to belong to this person and to be unsent */
-    public function addUserMessage(Conversation $c, string $text, iterable $files = []): Message
+    public function addUserMessage(Conversation $c, string $text, iterable $files = [], ?string $outputFormat = null): Message
     {
-        $m = Message::create(['conversation_id' => $c->id, 'role' => 'user', 'content' => $text]);
+        $m = Message::create(['conversation_id' => $c->id, 'role' => 'user', 'content' => $text, 'output_format' => $outputFormat]);
         foreach ($files as $f) {
             $f->update(['message_id' => $m->id, 'conversation_id' => $c->id]);
         }
@@ -66,16 +67,40 @@ class ChatService
         }
 
         $context = $this->context($c);
-        $estimate = (int) ceil(array_sum(array_map(fn ($m) => strlen($m['content']), $context)) / 4);
+        $format = $c->messages()->whereNull('superseded_at')->where('role', 'user')->latest('id')->value('output_format');
+        // A format asked for by name (API only) is strict. Otherwise the agent decides, from what the person wrote, whether a file is wanted.
+        array_unshift($context, ['role' => 'system', 'content' => $format ? GeneratedFiles::instruction($format) : GeneratedFiles::autoInstruction()]);
+        $estimate = 0;
+        foreach ($context as $message) {
+            if (is_string($message['content'])) {
+                $estimate += (int) ceil(strlen($message['content']) / 4);
+            } else {
+                foreach ($message['content'] as $part) {
+                    $estimate += $part['type'] === 'text' ? (int) ceil(strlen($part['text']) / 4) : 4000;
+                }
+            }
+        }
         $requestId = 'chat-'.Str::lower(Str::random(16));
 
         $out = $this->runner->run(
             $user, $agent, $requestId, $target['model'] ?? (string) Settings::get('hermes_model_label'),
-            fn () => $this->hermes->chat($context, $target),
+            fn () => $this->hermes->chat($context, $target, 'thryve-user-'.$user->id.'-conversation-'.$c->id.'-'.$requestId),
             'chat', $estimate, $c->id,
         );
 
-        $reply = Message::create(['conversation_id' => $c->id, 'role' => 'assistant', 'content' => $out['result']['content'], 'request_id' => $requestId]);
+        if ($format) {
+            $generator = app(GeneratedFiles::class);
+            if (($out['result']['finish'] ?? null) === 'length') {
+                throw new FileGenerationFailed;
+            }
+            $reply = $generator->save($c->id, $user->id, $requestId, $generator->decode($out['result']['content'], $format));
+        } else {
+            $generator = app(GeneratedFiles::class);
+            $found = $generator->extractAuto((string) $out['result']['content'], ($out['result']['finish'] ?? null) === 'length');
+            $reply = $found
+                ? $generator->save($c->id, $user->id, $requestId, $found)
+                : Message::create(['conversation_id' => $c->id, 'role' => 'assistant', 'content' => $out['result']['content'], 'request_id' => $requestId]);
+        }
         $c->update(['last_message_at' => now()]);
         $this->allowance->notifyThresholds($user, BusinessDay::today());
 
@@ -115,19 +140,39 @@ class ChatService
     private function context(Conversation $c): array
     {
         $rows = $c->messages()->whereNull('superseded_at')->orderByDesc('id')->get(['id', 'role', 'content']);
-        $files = Attachment::whereIn('message_id', $rows->pluck('id'))->orderBy('id')->get()->groupBy('message_id');
+        $files = Attachment::where('user_id', $c->user_id)->where('conversation_id', $c->id)->whereIn('message_id', $rows->pluck('id'))->orderBy('id')->get()->groupBy('message_id');
         $kept = [];
         $size = 0;
+        $imageBytes = 0;
         foreach ($rows as $r) {
             $content = $r->content;
+            $images = [];
             foreach ($files[$r->id] ?? [] as $f) {
+                if ($f->generated) {
+                    $content .= "\n[Previously generated file: {$f->original_name}]";
+
+                    continue;
+                }
+                if (in_array($f->kind, ['png', 'jpg', 'jpeg'], true)) {
+                    $bytes = Storage::disk('private')->get($f->storage_key);
+                    if ($imageBytes + strlen($bytes) > 6 * 1024 * 1024) {
+                        $content .= "\n[Earlier image omitted to fit the request limit: {$f->original_name}. Ask the user to attach it again if needed.]";
+
+                        continue;
+                    }
+                    $imageBytes += strlen($bytes);
+                    $mime = $f->kind === 'png' ? 'image/png' : 'image/jpeg';
+                    $images[] = ['type' => 'image_url', 'image_url' => ['url' => 'data:'.$mime.';base64,'.base64_encode($bytes)]];
+
+                    continue;
+                }
                 $content .= "\n\n[Attached file: {$f->original_name}".($f->truncated ? ' (shortened)' : '')."]\n{$f->extracted_text}\n[End of file]";
             }
             $size += strlen($content);
             if ($kept && $size > self::CONTEXT_CHARS) {
                 break;
             }
-            $kept[] = ['role' => $r->role, 'content' => $content];
+            $kept[] = ['role' => $r->role, 'content' => $images ? array_merge([['type' => 'text', 'text' => $content]], $images) : $content];
         }
 
         return array_reverse($kept);

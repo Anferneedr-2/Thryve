@@ -60,7 +60,7 @@ export default function Chat() {
     const [removing, setRemoving] = useState(null);
     const [editing, setEditing] = useState(null);
     const [files, setFiles] = useState([]); // {key, id?, name, size, status: uploading|ready|error, error?}
-    const [limits, setLimits] = useState({ max_count: 6, max_mb: 15, types: ['txt', 'md', 'csv', 'docx', 'xlsx'] });
+    const [limits, setLimits] = useState({ max_count: 6, max_mb: 15, types: ['txt', 'md', 'csv', 'docx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg'] });
     const pickerRef = useRef(null);
     const abort = useRef(null);
     const endRef = useRef(null);
@@ -333,6 +333,7 @@ export default function Chat() {
                     )}
 
                     <div className="cw-composer">
+
                         {files.length > 0 && (
                             <div className="chat-chips" aria-label="Attached files">
                                 {files.map((f) => (
@@ -363,7 +364,7 @@ export default function Chat() {
                                 : <button type="button" className="cw-send" aria-label="Send" disabled={!draft.trim() || blocked || uploading} onClick={() => submit()}><Icon name="up" /></button>}
                         </div>
                     </div>
-                    <p className="cw-fine">AI answers can be wrong: check anything important. Do not enter passwords, card numbers or ID numbers.</p>
+                    <p className="cw-fine">AI answers can be wrong: review files before using them. Images: up to 4 MB each; PDFs: up to 8 MB, text-based only. Do not attach sensitive information.</p>
                 </div>
             </section>
 
