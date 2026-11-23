@@ -15,17 +15,17 @@ class Ledger
     public function __construct(private Allowance $allowance, private PriceBook $prices) {}
 
     /** Reserve tokens and open the record. @throws TokenLimitReached */
-    public function begin(?User $user, ?int $agentId, string $requestId, int $attempt, string $model, string $purpose = 'chat', int $estimate = 0, ?int $conversationId = null): UsageRecord
+    public function begin(?User $user, ?int $agentId, string $requestId, int $attempt, string $model, string $purpose = 'chat', int $estimate = 0, ?int $conversationId = null, ?string $requestKind = null): UsageRecord
     {
         $date = BusinessDay::today();
         $lockKey = $purpose === 'analysis' ? 'system' : 'user:'.$user->id;
 
-        return $this->allowance->withLock($lockKey, function () use ($user, $agentId, $requestId, $attempt, $model, $purpose, $estimate, $conversationId, $date) {
+        return $this->allowance->withLock($lockKey, function () use ($user, $agentId, $requestId, $attempt, $model, $purpose, $estimate, $conversationId, $date, $requestKind) {
             $this->allowance->assertAvailable($user, $purpose, $date);
 
             return UsageRecord::create([
                 'attempt_id' => "{$requestId}#{$attempt}", 'request_id' => $requestId, 'user_id' => $user?->id ?? $this->systemUserId(),
-                'conversation_id' => $conversationId, 'agent_id' => $agentId, 'model' => $model, 'purpose' => $purpose,
+                'conversation_id' => $conversationId, 'agent_id' => $agentId, 'model' => $model, 'purpose' => $purpose, 'request_kind' => $requestKind,
                 'input_tokens' => max(0, $estimate), 'output_tokens' => 0, 'is_estimate' => true, 'status' => 'pending', 'work_date' => $date,
             ]);
         });

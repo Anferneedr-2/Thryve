@@ -25,5 +25,9 @@ class AppServiceProvider extends ServiceProvider
         // Own counters, so other throttled calls (like the attendance heartbeat) never use up these small allowances.
         RateLimiter::for('transfer-chats', fn (Request $r) => Limit::perMinute(20)->by('transfer-chats:'.($r->user()?->id ?? $r->ip())));
         RateLimiter::for('transfer-key', fn (Request $r) => Limit::perMinute(5)->by('transfer-key:'.($r->user()?->id ?? $r->ip())));
+        RateLimiter::for('chat-send', fn (Request $r) => Limit::perMinute(30)->by('chat-send:'.($r->user()?->id ?? $r->ip())));
+        RateLimiter::for('chat-control', fn (Request $r) => Limit::perMinute(120)->by('chat-control:'.($r->user()?->id ?? $r->ip())));
+        RateLimiter::for('reports-read', fn (Request $r) => Limit::perMinute(120)->by('reports-read:'.($r->user()?->id ?? $r->ip())));
+        RateLimiter::for('reports-export', fn (Request $r) => Limit::perMinute(10)->by('reports-export:'.($r->user()?->id ?? $r->ip())));
     }
 }

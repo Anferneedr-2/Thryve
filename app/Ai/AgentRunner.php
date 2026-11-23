@@ -3,6 +3,7 @@
 namespace App\Ai;
 
 use App\Models\Agent;
+use App\Models\UsageRecord;
 use App\Models\User;
 use App\Notifications\Notifier;
 
@@ -17,15 +18,15 @@ class AgentRunner
 
     /**
      * @param  callable(): array{input: int, output: int, estimate?: bool}  $attempt  returns real counts or throws ProviderException
-     * @return array{usage: \App\Models\UsageRecord, result: array}
+     * @return array{usage: UsageRecord, result: array}
      *
      * @throws AgentUnavailable the agent cannot take requests at all (missing, disabled or revoked)
      * @throws TokenLimitReached
      * @throws ProviderException
      */
-    public function run(?User $user, ?Agent $agent, string $requestId, string $model, callable $attempt, string $purpose = 'chat', int $estimate = 0, ?int $conversationId = null): array
+    public function run(?User $user, ?Agent $agent, string $requestId, string $model, callable $attempt, string $purpose = 'chat', int $estimate = 0, ?int $conversationId = null, ?string $requestKind = null): array
     {
-        $record = $this->ledger->begin($user, $agent?->id, $requestId, 1, $model, $purpose, $estimate, $conversationId);
+        $record = $this->ledger->begin($user, $agent?->id, $requestId, 1, $model, $purpose, $estimate, $conversationId, $requestKind);
         $t0 = hrtime(true);
         $ms = fn () => (int) ((hrtime(true) - $t0) / 1e6);
 
@@ -40,7 +41,7 @@ class AgentRunner
             throw $e;
         }
 
-        $usage = $this->ledger->finish($record, 'success', (int) $result['input'], (int) $result['output'], (bool) ($result['estimate'] ?? false), $ms());
+        $usage = $this->ledger->finish($record, ($result['finish'] ?? null) === 'cancelled' ? 'cancelled' : 'success', (int) $result['input'], (int) $result['output'], (bool) ($result['estimate'] ?? false), $ms());
 
         return ['usage' => $usage, 'result' => $result];
     }
@@ -54,7 +55,7 @@ class AgentRunner
             return;
         }
         // The agent did no work (or told us exactly what it did): record the real numbers, zero if none.
-        $this->ledger->finish($record, 'failed', (int) ($e->inputTokens ?? 0), (int) ($e->outputTokens ?? 0), false, $ms, $e->category);
+        $this->ledger->finish($record, 'failed', (int) ($e->inputTokens ?? 0), (int) ($e->outputTokens ?? 0), $e->isEstimate, $ms, $e->category);
     }
 
     /** Tell admins about problems they can fix, at most once per agent and kind per hour. */

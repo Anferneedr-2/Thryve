@@ -19,6 +19,8 @@ use App\Support\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /** Private conversations: every query is scoped to the signed-in person, and another person's id looks like "not found". */
 class ChatController extends Controller
@@ -59,7 +61,7 @@ class ChatController extends Controller
     }
 
     /** Start a conversation (or continue one) with a new message. */
-    public function send(Request $request): JsonResponse
+    public function send(Request $request): JsonResponse|StreamedResponse
     {
         $d = $request->validate([
             'message' => ['required', 'string', 'max:20000'],
@@ -101,7 +103,7 @@ class ChatController extends Controller
     }
 
     /** Ask again for the last user message: after a failure, or to replace the current answer. */
-    public function regenerate(Request $request, int $id): JsonResponse
+    public function regenerate(Request $request, int $id): JsonResponse|StreamedResponse
     {
         $c = $this->mine($request, $id);
         if ($denied = $this->accessProblem($request->user(), $c)) {
@@ -112,11 +114,11 @@ class ChatController extends Controller
             return Api::error('nothing_to_answer', 'This conversation has no message to answer.', 409);
         }
 
-        return $this->respond($request, $c);
+        return $this->respond($request, $c, 'regenerate');
     }
 
     /** Edit a user message. It and everything after it are replaced (kept as hidden history) and a new answer is requested. */
-    public function edit(Request $request, int $id, int $messageId): JsonResponse
+    public function edit(Request $request, int $id, int $messageId): JsonResponse|StreamedResponse
     {
         $c = $this->mine($request, $id);
         if ($denied = $this->accessProblem($request->user(), $c)) {
@@ -135,7 +137,7 @@ class ChatController extends Controller
         $new = $this->chat->addUserMessage($c, $text, [], $original->output_format);
         $this->chat->carryFiles($original, $new);
 
-        return $this->respond($request, $c);
+        return $this->respond($request, $c, 'edit');
     }
 
     public function rate(Request $request, int $id, int $messageId): JsonResponse
@@ -239,11 +241,92 @@ class ChatController extends Controller
         return null;
     }
 
-    private function respond(Request $request, Conversation $c): JsonResponse
+    public function stop(Request $request, string $stream): JsonResponse
     {
+        $row = DB::table('chat_requests')->where('id', $stream)->where('user_id', $request->user()->id)->first();
+        abort_unless($row, 404);
+        if ($row->status === 'running') {
+            DB::table('chat_requests')->where('id', $stream)->where('status', 'running')->update(['cancel_requested' => true, 'updated_at' => now()]);
+        }
+
+        return Api::ok(['requested' => $row->status === 'running', 'status' => $row->status]);
+    }
+
+    private function streamResponse(Request $request, Conversation $c, string $kind): StreamedResponse
+    {
+        $id = $request->attributes->get('chat_request_id');
+        $sessionId = $request->session()->getId();
+        $userId = $request->user()->id;
+
+        return response()->stream(function () use ($request, $c, $kind, $id, $sessionId, $userId) {
+            $old = ignore_user_abort(true);
+            $status = 'failed';
+            $accessLost = false;
+            $event = function (string $event, array $data) use (&$accessLost) {
+                if ($accessLost && $event !== 'failure') {
+                    return;
+                }echo 'event: '.$event."\n".'data: '.json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)."\n\n";
+                if (! app()->runningUnitTests()) {
+                    if (ob_get_level() > 0) {
+                        @ob_flush();
+                    }flush();
+                }
+            };
+            $checked = 0.;
+            $cancelled = false;
+            $pulse = microtime(true);
+            $stop = function () use ($id, $sessionId, $userId, $c, &$checked, &$cancelled, &$accessLost, &$pulse) {
+                if (! app()->runningUnitTests() && microtime(true) - $checked < 0.5) {
+                    return $cancelled;
+                }$checked = microtime(true);
+                $row = DB::table('chat_requests')->where('id', $id)->first();
+                $u = User::find($userId);
+                $agent = $c->agent_id ? Agent::active()->find($c->agent_id) : null;
+                $accessLost = (bool) (! $u?->is_active || $u->session_id !== $sessionId || ($c->agent_id && (! $agent || ! Agent::canUse($u, $agent))));
+                if (! app()->runningUnitTests() && ! $accessLost && microtime(true) - $pulse >= 1) {
+                    echo ": keep-alive\n\n";
+                    if (ob_get_level() > 0) {
+                        @ob_flush();
+                    }
+                    flush();
+                    $pulse = microtime(true);
+                }
+
+                return $cancelled = (bool) (connection_aborted() || ! $row || $row->cancel_requested || $accessLost);
+            };
+            try {
+                $event('started', ['stream_id' => $id, 'conversation' => $this->summary($c)]);
+                $response = $this->respond($request, $c, $kind, fn ($text) => $event('delta', ['text' => $text]), $stop);
+                $checked = 0.;
+                $stop();
+                $payload = $response->getData(true);
+                if ($accessLost) {
+                    $status = 'cancelled';
+                    $event('failure', ['code' => 'auth_changed', 'message' => 'Your access changed. Please sign in again.']);
+                } elseif (isset($payload['error'])) {
+                    $event('failure', $payload['error']);
+                } else {
+                    $status = ($payload['data']['reply']['completion_status'] ?? null) === 'cancelled' ? 'cancelled' : 'completed';
+                    $event('complete', $payload['data']);
+                }
+            } catch (\Throwable $e) {
+                report($e);
+                $event('failure', ['code' => 'ai_failed', 'message' => 'The response was interrupted. Reopen this conversation to check its saved state.', 'details' => ['conversation' => $this->summary($c)]]);
+            } finally {
+                DB::table('chat_requests')->where('id', $id)->update(['status' => $status, 'updated_at' => now()]);
+                ignore_user_abort($old);
+            }
+        }, 200, ['Content-Type' => 'text/event-stream; charset=UTF-8', 'Cache-Control' => 'private, no-cache, no-store, no-transform', 'X-Accel-Buffering' => 'no', 'X-Content-Type-Options' => 'nosniff']);
+    }
+
+    private function respond(Request $request, Conversation $c, string $requestKind = 'send', ?callable $emit = null, ?callable $stop = null): JsonResponse|StreamedResponse
+    {
+        if ($emit === null && str_contains($request->header('Accept', ''), 'text/event-stream')) {
+            return $this->streamResponse($request, $c, $requestKind);
+        }
         $base = ['conversation' => $this->summary($c)];
         try {
-            $reply = $this->chat->answer($request->user(), $c);
+            $reply = $this->chat->answer($request->user(), $c, $requestKind, $emit, $stop);
         } catch (FileGenerationFailed $e) {
             return Api::error('file_generation_failed', $e->getMessage().' Your message is saved; generation may have used tokens.', 502, $base);
         } catch (TokenLimitReached $e) {
@@ -272,7 +355,7 @@ class ChatController extends Controller
 
     private function message(Message $m): array
     {
-        return ['id' => $m->id, 'role' => $m->role, 'content' => $m->content, 'rating' => $m->rating, 'created_at' => $m->created_at->toIso8601String(),
+        return ['id' => $m->id, 'role' => $m->role, 'content' => $m->content, 'rating' => $m->rating, 'completion_status' => $m->completion_status, 'created_at' => $m->created_at->toIso8601String(),
             'attachments' => Attachment::where('message_id', $m->id)->orderBy('id')->get()->map(fn ($a) => AttachmentController::present($a))->all()];
     }
 }

@@ -56,7 +56,7 @@ class ChatService
      * Answer the latest user message. Throws TokenLimitReached, AgentUnavailable or ProviderException; the user's
      * message stays saved so the person can retry.
      */
-    public function answer(User $user, Conversation $c): Message
+    public function answer(User $user, Conversation $c, string $requestKind = 'send', ?callable $emit = null, ?callable $stop = null): Message
     {
         $agent = $this->agentFor($c);
         $target = null;
@@ -82,11 +82,44 @@ class ChatService
         }
         $requestId = 'chat-'.Str::lower(Str::random(16));
 
-        $out = $this->runner->run(
-            $user, $agent, $requestId, $target['model'] ?? (string) Settings::get('hermes_model_label'),
-            fn () => $this->hermes->chat($context, $target, 'thryve-user-'.$user->id.'-conversation-'.$c->id.'-'.$requestId),
-            'chat', $estimate, $c->id,
-        );
+        $sent = '';
+        $raw = '';
+        $push = function (string $part) use (&$raw, &$sent, $emit, $format) {
+            $raw .= $part;
+            if (! $format && $emit) {
+                $safe = StreamText::visible($raw);
+                if (strlen($safe) > strlen($sent)) {
+                    $emit(substr($safe, strlen($sent)));
+                    $sent = $safe;
+                }
+            }
+        };
+        try {
+            $out = $this->runner->run(
+                $user, $agent, $requestId, $target['model'] ?? (string) Settings::get('hermes_model_label'),
+                fn () => $emit ? $this->hermes->stream($context, $target, 'thryve-user-'.$user->id.'-conversation-'.$c->id.'-'.$requestId, $push, $stop ?? fn () => false) : $this->hermes->chat($context, $target, 'thryve-user-'.$user->id.'-conversation-'.$c->id.'-'.$requestId),
+                'chat', $estimate, $c->id, $requestKind,
+            );
+        } catch (ProviderException $e) {
+            $partial = $format ? '' : StreamText::visible($e->partialContent ?? $raw, true);
+            if ($partial !== '') {
+                Message::create(['conversation_id' => $c->id, 'role' => 'assistant', 'content' => $partial, 'request_id' => $requestId, 'completion_status' => 'failed']);
+                $c->update(['last_message_at' => now()]);
+            }
+            throw $e;
+        }
+
+        $tail = $format ? '' : StreamText::visible($out['result']['content'], true);
+        if ($emit && strlen($tail) > strlen($sent)) {
+            $emit(substr($tail, strlen($sent)));
+        }
+        if (($out['result']['finish'] ?? null) === 'cancelled') {
+            $partial = $format ? '' : StreamText::visible($out['result']['content'], true);
+            $reply = Message::create(['conversation_id' => $c->id, 'role' => 'assistant', 'content' => $partial, 'request_id' => $requestId, 'completion_status' => 'cancelled']);
+            $c->update(['last_message_at' => now()]);
+
+            return $reply;
+        }
 
         if ($format) {
             $generator = app(GeneratedFiles::class);
@@ -139,7 +172,7 @@ class ChatService
     /** @return list<array{role: string, content: string}> newest messages that fit, oldest first */
     private function context(Conversation $c): array
     {
-        $rows = $c->messages()->whereNull('superseded_at')->orderByDesc('id')->get(['id', 'role', 'content']);
+        $rows = $c->messages()->whereNull('superseded_at')->where(fn ($q) => $q->where('role', '!=', 'assistant')->orWhere('content', '!=', ''))->orderByDesc('id')->get(['id', 'role', 'content']);
         $files = Attachment::where('user_id', $c->user_id)->where('conversation_id', $c->id)->whereIn('message_id', $rows->pluck('id'))->orderBy('id')->get()->groupBy('message_id');
         $kept = [];
         $size = 0;

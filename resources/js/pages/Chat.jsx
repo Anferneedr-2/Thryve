@@ -53,6 +53,9 @@ export default function Chat() {
     const [filter, setFilter] = useState(null); // assistant whose chats the list is limited to
     const [draft, setDraft] = useState('');
     const [busy, setBusy] = useState(false);
+    const [liveText, setLiveText] = useState('');
+    const [stopping, setStopping] = useState(false);
+    const [canStop, setCanStop] = useState(false);
     const [error, setError] = useState(null); // {message, code}
     const [pendingText, setPendingText] = useState(null);
     const [sensitive, setSensitive] = useState(null);
@@ -63,6 +66,15 @@ export default function Chat() {
     const [limits, setLimits] = useState({ max_count: 6, max_mb: 15, types: ['txt', 'md', 'csv', 'docx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg'] });
     const pickerRef = useRef(null);
     const abort = useRef(null);
+    const detachStream = useCallback(() => { const ctl = abort.current; if (!ctl) return; ctl.detached = true; setLiveText(''); setPendingText(null); setCanStop(false); if (ctl.streamId) send('POST', `/chat/streams/${ctl.streamId}/stop`).catch(() => {}); ctl.abort(); }, []);
+    const pathRef = useRef(path); pathRef.current = path;
+    useEffect(() => {
+        const ctl = abort.current;
+        if (ctl && ctl.origin !== path) {
+            detachStream();
+        }
+    }, [path]);
+    useEffect(() => () => { const ctl = abort.current; if (ctl) ctl.detached = true; if (ctl?.streamId) send('POST', `/chat/streams/${ctl.streamId}/stop`).catch(() => {}); ctl?.abort(); }, []);
     const endRef = useRef(null);
     const box = useRef(null);
     const stick = useRef(true);
@@ -76,12 +88,12 @@ export default function Chat() {
         get('/chat/agents').then((l) => { setAgents(l); setPicked((p) => p ?? (l.find((a) => a.is_default) ?? l[0])?.id ?? null); }).catch(() => setAgents([]));
     }, [loadUsage]);
     useEffect(() => { const t = setTimeout(loadList, query ? 250 : 0); return () => clearTimeout(t); }, [loadList, query]);
-    useEffect(() => { if (stick.current) endRef.current?.scrollIntoView({ block: 'end' }); }, [current?.messages?.length, busy, pendingText]);
+    useEffect(() => { if (stick.current) endRef.current?.scrollIntoView({ block: 'end' }); }, [current?.messages?.length, busy, pendingText, liveText]);
 
     // The address decides which conversation is open: /chat is a new chat, /chat/12 is conversation 12.
     useEffect(() => {
-        if (routeId === null) { setCurrent(null); setError(null); setEditing(null); return undefined; }
-        if (current?.id === routeId) return undefined;
+        if (routeId === null) { setCurrent(null); setError(null); setEditing(null); setLoadingConv(false); return undefined; }
+        if (current?.id === routeId) { setLoadingConv(false); return undefined; }
         let cancelled = false;
         setLoadingConv(true); setError(null); setEditing(null);
         get(`/conversations/${routeId}`)
@@ -104,8 +116,9 @@ export default function Chat() {
 
     // ---- navigation helpers ----------------------------------------------------------------------------------------------
     const closeOverlays = () => { setLeftOv(false); setRightOv(false); };
-    const openChat = (id) => { closeOverlays(); navigate(`/chat/${id}`); };
+    const openChat = (id) => { if (pathRef.current !== `/chat/${id}`) detachStream(); setSensitive(null); closeOverlays(); navigate(`/chat/${id}`); };
     const startNew = (agentId) => {
+        detachStream(); setSensitive(null);
         closeOverlays();
         if (agentId) setPicked(agentId);
         setCurrent(null); setError(null); setEditing(null); setDraft('');
@@ -151,32 +164,44 @@ export default function Chat() {
         return hit ? [{ ...hit, last_message_at: now }, ...l.filter((c) => c.id !== current.id)] : l;
     });
     const run = async (fn, restore) => {
+        if (abort.current) return false;
         touchCurrent();
-        setBusy(true); setError(null);
+        setBusy(true); setError(null); setLiveText(''); setStopping(false); setCanStop(false);
         const ctl = new AbortController(); abort.current = ctl;
+        ctl.origin = pathRef.current;
+        const active = () => !ctl.detached && pathRef.current === ctl.origin && abort.current === ctl;
         try {
-            const r = await fn(ctl.signal);
+            const r = await fn(ctl.signal, false, (event, data) => {
+                if (event === 'started') { ctl.streamId = data.stream_id; ctl.conversationId = data.conversation.id; if (!active()) { send('POST', `/chat/streams/${ctl.streamId}/stop`).catch(() => {}); return; } setCanStop(true); setCurrent(previous => ({ ...data.conversation, messages: previous?.id === data.conversation.id ? previous.messages : [] })); }
+                if (event === 'delta' && active()) setLiveText(text => text + data.text);
+            });
+            if (!active()) return false;
             const conv = r.data.conversation;
-            setCurrent(await get(`/conversations/${conv.id}`));
+            const saved = await get(`/conversations/${conv.id}`); if (!active()) return false; setCurrent(saved);
             loadList(); loadUsage(); stick.current = true;
             if (routeId !== conv.id) navigate(`/chat/${conv.id}`);
             return true;
         } catch (e) {
+            if (!active()) return false;
             if (e.name === 'AbortError') {
+                if (ctl.stopRequested && ctl.conversationId) {
+                    try { const saved = await get(`/conversations/${ctl.conversationId}`); if (!active()) return false; setCurrent(saved); loadList(); loadUsage(); if (routeId !== saved.id) navigate(`/chat/${saved.id}`); return true; }
+                    catch { if (!active()) return false; }
+                }
                 setError({ message: 'Stopped. The assistant may still finish in the background: reopen this conversation in a minute to see it.', code: 'stopped' });
                 restore?.();
             } else if (e.code === 'sensitive_warning') {
-                setSensitive({ message: e.message, retry: () => run((s) => fn(s, true), restore) });
+                setSensitive({ message: e.message, retry: () => run((s, _ack, event) => fn(s, true, event), restore) });
                 restore?.();
             } else {
                 setError({ message: errorText(e), code: e.code });
-                const cid = e.details?.conversation?.id;
-                if (cid) { try { setCurrent(await get(`/conversations/${cid}`)); loadList(); if (routeId !== cid) navigate(`/chat/${cid}`); } catch { /* keep going */ } }
-                if (['sensitive_blocked', 'validation_failed'].includes(e.code)) restore?.();
+                const cid = e.details?.conversation?.id || ctl.conversationId;
+                if (cid) { try { const saved = await get(`/conversations/${cid}`); if (!active()) return false; setCurrent(saved); loadList(); if (routeId !== cid) navigate(`/chat/${cid}`); } catch { /* keep going */ } }
+                if (!cid || e.status === 409 || ['sensitive_blocked', 'validation_failed'].includes(e.code)) restore?.();
                 loadUsage();
             }
             return false;
-        } finally { setBusy(false); setPendingText(null); abort.current = null; }
+        } finally { setBusy(false); setPendingText(null); setLiveText(''); setStopping(false); setCanStop(false); abort.current = null; }
     };
 
     const uploading = files.some((f) => f.status === 'uploading');
@@ -187,14 +212,14 @@ export default function Chat() {
         const restore = () => setDraft(t);
         setDraft(''); setPendingText(t);
         // Files are cleared only after a successful send, so a failed send keeps both the text and the files.
-        const ok = await run((signal, ack) => postJson('/chat', 'POST', { message: t, conversation_id: current?.id, agent_id: current ? undefined : (picked ?? undefined), acknowledge_sensitive: ack || undefined, attachment_ids: ids }, signal), restore);
+        const ok = await run((signal, ack, onEvent) => postJson('/chat', 'POST', { message: t, conversation_id: current?.id, agent_id: current ? undefined : (picked ?? undefined), acknowledge_sensitive: ack || undefined, attachment_ids: ids }, signal, onEvent), restore);
         if (ok) setFiles((l) => l.filter((f) => !ids.includes(f.id)));
     };
-    const stop = () => abort.current?.abort();
-    const regenerate = () => { setPendingText(null); run((signal) => postJson(`/conversations/${current.id}/regenerate`, 'POST', {}, signal)); };
+    const stop = async () => { const ctl = abort.current; if (!ctl?.streamId || stopping) return; ctl.stopRequested = true; setStopping(true); const fallback = setTimeout(() => { if (abort.current === ctl) ctl.abort(); }, 2500); try { await send('POST', `/chat/streams/${ctl.streamId}/stop`); } catch (e) { if (!ctl.signal.aborted && abort.current === ctl) { toast(errorText(e)); setStopping(false); } } finally { clearTimeout(fallback); } };
+    const regenerate = () => { setPendingText(null); run((signal, _ack, onEvent) => postJson(`/conversations/${current.id}/regenerate`, 'POST', {}, signal, onEvent)); };
     const saveEdit = () => {
         const { id, text } = editing; setEditing(null); setPendingText(text);
-        run((signal, ack) => postJson(`/conversations/${current.id}/messages/${id}`, 'PATCH', { message: text, acknowledge_sensitive: ack || undefined }, signal));
+        run((signal, ack, onEvent) => postJson(`/conversations/${current.id}/messages/${id}`, 'PATCH', { message: text, acknowledge_sensitive: ack || undefined }, signal, onEvent));
     };
     const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } };
     // ---- speech to text (the browser's built-in recognition; the button is hidden where it is not available) ----------
@@ -305,7 +330,7 @@ export default function Chat() {
                     )}
                     {!loadingConv && (current || pendingText) && (
                         <div className="m-wrap">
-                            <Messages messages={messages} busy={busy} pendingText={pendingText} editing={editing} setEditing={setEditing} saveEdit={saveEdit}
+                            <Messages messages={messages} busy={busy} liveText={liveText} stopping={stopping} pendingText={pendingText} editing={editing} setEditing={setEditing} saveEdit={saveEdit}
                                 lastIsUser={lastIsUser} onCopy={copy} onRate={rate} onRegenerate={regenerate} />
                             <div ref={endRef} />
                         </div>
@@ -360,7 +385,7 @@ export default function Chat() {
                                     disabled={busy || blocked} onClick={toggleListening}><Icon name="mic" /></button>
                             )}
                             {busy
-                                ? <button type="button" className="cw-send stop" aria-label="Stop" onClick={stop}><Icon name="stop" /></button>
+                                ? <button type="button" className="cw-send stop" aria-label={stopping ? 'Stopping response' : 'Stop'} disabled={!canStop || stopping} onClick={stop}><Icon name="stop" /></button>
                                 : <button type="button" className="cw-send" aria-label="Send" disabled={!draft.trim() || blocked || uploading} onClick={() => submit()}><Icon name="up" /></button>}
                         </div>
                     </div>

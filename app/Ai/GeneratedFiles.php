@@ -60,6 +60,9 @@ final class GeneratedFiles
     public function extractAuto(string $content, bool $cutOff = false): ?array
     {
         $opening = substr_count($content, '```'.self::BLOCK);
+        if (preg_match_all('/```[ \t]*'.self::BLOCK.'\b/i', $content) !== $opening) {
+            throw new FileGenerationFailed;
+        }
         if ($opening === 0) {
             return null;
         }

@@ -5,7 +5,7 @@ import { sizeText } from './chatUtil';
 
 // The conversation. AI replies are plain text across the whole column (no bubble, no avatar) because answers are rich
 // text; only the person's own message sits in a bubble, on the right.
-export default function Messages({ messages, busy, pendingText, editing, setEditing, saveEdit, lastIsUser, onCopy, onRate, onRegenerate }) {
+export default function Messages({ messages, busy, liveText, stopping, pendingText, editing, setEditing, saveEdit, lastIsUser, onCopy, onRate, onRegenerate }) {
     const lastUserIndex = messages.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
     return (
         <ol className="m-thread" aria-live="polite" aria-label="Conversation">
@@ -37,6 +37,7 @@ export default function Messages({ messages, busy, pendingText, editing, setEdit
                             ))}
                         </div>
                     )}
+                    {['cancelled', 'failed'].includes(m.completion_status) && <p className="m-note">{m.completion_status === 'cancelled' ? 'Stopped' : 'Interrupted'} · {m.content ? 'partial answer saved' : 'no answer text received'}</p>}
 
                     {editing?.id !== m.id && (
                         <div className="m-acts">
@@ -60,7 +61,7 @@ export default function Messages({ messages, busy, pendingText, editing, setEdit
                 <li className="m user"><div className="bubble">{pendingText}</div></li>
             )}
             {busy && (
-                <li className="m ai" aria-label="The assistant is writing"><div className="chat-dots" aria-hidden="true"><i /><i /><i /></div></li>
+                <li className="m ai" aria-label={stopping ? 'Stopping response' : 'The assistant is writing'}>{liveText && <div className="body"><Markdown text={liveText} /></div>}<div className="chat-dots" aria-hidden="true"><i /><i /><i /></div>{stopping && <p className="m-note">Stopping and saving the partial answer…</p>}</li>
             )}
         </ol>
     );

@@ -7,6 +7,7 @@ use App\Models\Message;
 use App\Models\Role;
 use App\Models\UsageRecord;
 use App\Support\Settings;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -21,7 +22,7 @@ class ChatApiTest extends TestCase
     {
         parent::setUp();
         $this->useDatabaseSessions();
-        $this->seed(\Database\Seeders\RoleSeeder::class);
+        $this->seed(RoleSeeder::class);
         config(['services.hermes.url' => 'http://hermes.test/p/bot', 'services.hermes.key' => 'k-1234567890123456']);
     }
 
@@ -69,6 +70,17 @@ class ChatApiTest extends TestCase
 
         Http::assertSent(fn ($req) => count(collect($req['messages'])->where('role', '!=', 'system')->values()->all()) === 3
             && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[0]['content'] === 'one' && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[1]['content'] === 'First' && collect($req['messages'])->where('role', '!=', 'system')->values()->all()[2]['content'] === 'two');
+    }
+
+    public function test_attempt_types_distinguish_sends_regenerations_and_edits(): void
+    {
+        Http::fake(['*' => Http::response($this->answer())]);
+        [$user, $cookie] = $this->me();
+        $id = $this->say($cookie, 'Draft a note')->assertOk()->json('data.conversation.id');
+        $message = Message::where('conversation_id', $id)->where('role', 'user')->value('id');
+        $this->device($cookie)->postJson("/api/conversations/{$id}/regenerate")->assertOk();
+        $this->device($cookie)->patchJson("/api/conversations/{$id}/messages/{$message}", ['message' => 'Draft a short note'])->assertOk();
+        $this->assertSame(['send', 'regenerate', 'edit'], UsageRecord::where('user_id', $user->id)->orderBy('id')->pluck('request_kind')->all());
     }
 
     public function test_conversations_are_private_to_their_owner(): void

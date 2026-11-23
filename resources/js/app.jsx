@@ -29,8 +29,9 @@ import AgentsPanel from './pages/AgentsPanel';
 import PolicyAck from './pages/PolicyAck';
 import TokenGallery from './pages/TokenGallery';
 import AnswerGallery from './pages/AnswerGallery';
+import Reports from './pages/Reports';
 
-const ADMIN_ONLY = ['/people', '/agents', '/settings', '/attendance/team'];
+const ADMIN_ONLY = ['/people', '/agents', '/settings', '/attendance/team', '/reports'];
 const under = (path, base) => path === base || path.startsWith(`${base}/`);
 
 // The tab sets for each rail item. The server decides who may use the data; this only decides what is shown.
@@ -38,6 +39,16 @@ const sections = (user) => {
     const admin = user.role === 'admin' || user.role === 'super_admin';
     const sup = user.role === 'super_admin';
     return {
+        '/reports': admin && { title: 'Reports', preserveSearch: true, tabs: [
+            { id: 'overview', path: '/reports', label: 'Overview', node: <Reports view="overview" /> },
+            { id: 'usage', path: '/reports/usage', label: 'Usage & cost', node: <Reports view="usage" /> },
+            { id: 'quality', path: '/reports/quality', label: 'Quality', node: <Reports view="quality" /> },
+            { id: 'adoption', path: '/reports/adoption', label: 'Adoption', node: <Reports view="adoption" /> },
+            { id: 'attendance', path: '/reports/attendance', label: 'Attendance', node: <Reports view="attendance" /> },
+            { id: 'people', path: '/reports/people', label: 'People', node: <Reports view="people" /> },
+            { id: 'conversations', path: '/reports/conversations', label: 'Conversations', node: <Reports view="conversations" /> },
+            { id: 'audit', path: '/reports/audit', label: 'Audit', node: <Reports view="audit" /> },
+        ] },
         '/attendance': { title: 'Attendance', tabs: [{ id: 'mine', path: '/attendance', label: 'Mine', node: <Attendance /> }, ...(admin ? [{ id: 'team', path: '/attendance/team', label: 'Team', node: <TeamAttendance /> }] : [])] },
         '/people': admin && { title: 'People', tabs: [{ id: 'people', path: '/people', label: 'People', node: <People /> }, { id: 'departments', path: '/people/departments', label: 'Departments', node: <Departments /> }] },
         '/agents': admin && { title: 'AI agents', tabs: [
@@ -70,7 +81,7 @@ function Screen() {
     const section = base && sections(user)[base];
     // A tab path the person may not use (for example /attendance/team for an employee) is treated as no access.
     if (section?.area && section.paths.includes(path)) return <SettingsArea />;
-    if (section && section.tabs.some((t) => t.path === path)) return <Section title={section.title} tabs={section.tabs} />;
+    if (section && section.tabs.some((t) => t.path === path)) return <Section title={section.title} tabs={section.tabs} preserveSearch={section.preserveSearch} />;
 
     const denied = ADMIN_ONLY.some((b) => under(path, b));
     return (

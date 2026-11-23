@@ -14,6 +14,51 @@ use Illuminate\Support\Facades\Http;
  */
 class HermesClient
 {
+    public function stream(array $messages, ?array $target, ?string $sessionId, callable $emit, callable $stop): array
+    {
+        if ($target === null && (app(AgentService::class)->any() || ! $this->configured())) {
+            throw new ProviderException('unavailable');
+        }
+        $decoder = new StreamDecoder(\Closure::fromCallable($emit));
+        $timeout = max(5, (int) config('services.hermes.timeout', 120));
+        $finish = null;
+        try {
+            if ($stop()) {
+                return ['content' => '', 'input' => 0, 'output' => 0, 'estimate' => false, 'finish' => 'cancelled'];
+            }
+            $headers = [];
+            if ($key = $target['key'] ?? config('services.hermes.key')) {
+                $headers[] = 'Authorization: Bearer '.$key;
+            }
+            if ($sessionId) {
+                $headers[] = 'X-Hermes-Session-Id: '.$sessionId;
+            }
+            $cancelled = app(StreamTransport::class)->read(rtrim($target['url'] ?? (string) config('services.hermes.url'), '/').'/v1/chat/completions', $headers, [
+                'model' => $target['model'] ?? config('services.hermes.model'), 'messages' => $messages, 'stream' => true, 'stream_options' => ['include_usage' => true],
+            ], $timeout, fn ($bytes) => $decoder->feed($bytes), $stop);
+            if ($cancelled) {
+                $finish = 'cancelled';
+            }
+            if ($finish !== 'cancelled' && $stop()) {
+                $finish = 'cancelled';
+            }
+            if ($finish !== 'cancelled' && (! $decoder->done || trim($decoder->content) === '')) {
+                throw new ProviderException('bad_response', ambiguous: true);
+            }
+            $usage = $decoder->usage;
+            $estimate = $usage === null;
+
+            return ['content' => $decoder->content, 'input' => $usage['input'] ?? (int) ceil(strlen(json_encode($messages)) / 4), 'output' => $usage['output'] ?? (int) ceil(strlen($decoder->content) / 4), 'estimate' => $estimate, 'finish' => $finish ?? $decoder->finish, 'model' => $target['model'] ?? null];
+        } catch (ProviderException $e) {
+            if ($e->ambiguous || $decoder->content !== '') {
+                throw new ProviderException($e->category, $e->retryable, true, $decoder->usage['input'] ?? (int) ceil(strlen(json_encode($messages)) / 4), $decoder->usage['output'] ?? (int) ceil(strlen($decoder->content) / 4), $decoder->content, $decoder->usage === null);
+            }
+            throw $e;
+        } catch (ConnectionException) {
+            throw new ProviderException('timeout', ambiguous: true, partialContent: $decoder->content);
+        }
+    }
+
     public function configured(): bool
     {
         return filled(config('services.hermes.url'));

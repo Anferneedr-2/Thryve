@@ -18,6 +18,8 @@ class ProviderException extends RuntimeException
         public readonly bool $ambiguous = false,
         public readonly ?int $inputTokens = null,
         public readonly ?int $outputTokens = null,
+        public readonly ?string $partialContent = null,
+        public readonly bool $isEstimate = false,
     ) {
         parent::__construct("Provider call failed: {$category}");
     }

@@ -10,6 +10,7 @@ export function railItems(user) {
     ];
     if (isAdmin(user)) {
         items.push(
+            { id: '/reports', label: 'Reports', icon: 'layers' },
             { id: '/people', label: 'People', icon: 'users' },
             { id: '/agents', label: 'Agents', icon: 'chip', title: 'AI agents' },
         );
