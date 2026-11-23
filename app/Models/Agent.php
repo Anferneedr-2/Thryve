@@ -28,9 +28,29 @@ class Agent extends Model
         return $this->hasMany(AgentCheck::class);
     }
 
+    public const TYPE_CHAT = 'chat';
+
+    public const TYPE_REPORT = 'report';
+
     public function scopeActive($q)
     {
         return $q->whereNull('removed_at');
+    }
+
+    /** Agents people can talk to. Report agents are background-only and never appear in any chat list. */
+    public function scopeChat($q)
+    {
+        return $q->where('type', self::TYPE_CHAT);
+    }
+
+    public function scopeReport($q)
+    {
+        return $q->where('type', self::TYPE_REPORT);
+    }
+
+    public function isReport(): bool
+    {
+        return $this->type === self::TYPE_REPORT;
     }
 
     /** Full address of this agent's Hermes profile. */
@@ -52,7 +72,7 @@ class Agent extends Model
      */
     public static function availableTo(User $user)
     {
-        $q = static::active()->where('is_enabled', true)->whereNotNull('outbound_key');
+        $q = static::active()->chat()->where('is_enabled', true)->whereNotNull('outbound_key');
         if (! $user->hasRole(Role::ADMIN, Role::SUPER_ADMIN)) {
             $q->where(fn ($w) => $w->where('is_default', true)
                 ->orWhereIn('id', DB::table('agent_user')->where('user_id', $user->id)->select('agent_id')));

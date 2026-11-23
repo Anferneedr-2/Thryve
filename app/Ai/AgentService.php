@@ -43,8 +43,11 @@ class AgentService
         return DB::transaction(function () use ($actor, $d) {
             $out = self::newKey();
             $in = self::newKey(self::IN_PREFIX);
-            $first = ! Agent::active()->exists();
+            $type = $d['type'] ?? Agent::TYPE_CHAT;
+            // The first chatbot becomes the default. A report agent is never a chatbot, so it is never the default.
+            $first = $type === Agent::TYPE_CHAT && ! Agent::active()->chat()->exists();
             $agent = Agent::create([
+                'type' => $type,
                 'name' => $d['name'], 'slug' => $this->slugFor($d['name']), 'base_url' => rtrim($d['base_url'], '/'), 'profile' => $d['profile'] ?? null, 'description' => $d['description'] ?? null,
                 'is_default' => $first, 'created_by' => $actor->id,
                 'outbound_key' => $out, 'outbound_fingerprint' => self::fingerprint($out),
@@ -70,9 +73,10 @@ class AgentService
 
     // ---- what chat uses ---------------------------------------------------------------------
 
+    /** Is any chatbot set up? (A report agent alone does not count: chat would have nobody to talk to.) */
     public function any(): bool
     {
-        return Agent::active()->exists();
+        return Agent::active()->chat()->exists();
     }
 
     /**

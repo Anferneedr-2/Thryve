@@ -175,7 +175,7 @@ class ChatController extends Controller
     /** Which chatbot a new conversation uses. Null means "no agents are set up at all" (the old single-server setup). */
     private function pickAgent(User $user, ?int $agentId): Agent|JsonResponse|null
     {
-        if (! Agent::active()->exists()) {
+        if (! Agent::active()->chat()->exists()) {
             return null;
         }
         $available = Agent::availableTo($user)->orderByDesc('is_default')->get();

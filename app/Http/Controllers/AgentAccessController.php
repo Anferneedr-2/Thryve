@@ -33,7 +33,7 @@ class AgentAccessController extends Controller
             return Api::error('not_applicable', 'Admins and Super Admins can use every enabled chatbot.', 422);
         }
         $d = $request->validate(['agent_ids' => ['present', 'array'], 'agent_ids.*' => ['integer', 'distinct']]);
-        $assignable = Agent::active()->where('is_default', false)->pluck('id')->all();
+        $assignable = Agent::active()->chat()->where('is_default', false)->pluck('id')->all();
         $ids = array_values(array_unique($d['agent_ids']));
         if ($bad = array_diff($ids, $assignable)) {
             return Api::error('validation_failed', 'One of the chatbots cannot be assigned. The default chatbot is open to everyone, and removed ones cannot be given.', 422, ['agent_ids' => ['Choose from the listed chatbots only.']]);
@@ -58,7 +58,7 @@ class AgentAccessController extends Controller
 
         return [
             'all_access' => $all,
-            'agents' => Agent::active()->orderByDesc('is_default')->orderBy('name')->get()->map(fn ($a) => [
+            'agents' => Agent::active()->chat()->orderByDesc('is_default')->orderBy('name')->get()->map(fn ($a) => [
                 'id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default, 'is_enabled' => $a->is_enabled,
                 'assigned' => $a->is_default || $all || in_array($a->id, $assigned, true),
             ])->values(),

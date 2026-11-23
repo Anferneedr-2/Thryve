@@ -32,6 +32,9 @@ return [
         'default_theme' => ['default' => 'system', 'rules' => ['string', 'in:system,light,dark'], 'label' => 'Default theme', 'group' => 'general'],
         'idle_minutes' => ['default' => 30, 'type' => 'int', 'rules' => ['integer', 'between:1,480'], 'label' => 'Attendance idle threshold (minutes)', 'group' => 'work'],
         'analysis_idle_minutes' => ['default' => 15, 'type' => 'int', 'rules' => ['integer', 'between:1,240'], 'label' => 'Conversation analysis delay (minutes)', 'group' => 'work'],
+        // Conversation analysis (P07): off until a Super Admin switches it on, and it needs a report agent.
+        'analysis_enabled' => ['default' => false, 'type' => 'bool', 'rules' => ['boolean'], 'label' => 'Analyze conversations in the background', 'group' => 'work'],
+        'analysis_batch_size' => ['default' => 5, 'type' => 'int', 'rules' => ['integer', 'between:1,50'], 'label' => 'Conversations analyzed per run', 'group' => 'work'],
         'file_max_count' => ['default' => 6, 'type' => 'int', 'rules' => ['integer', 'between:1,20'], 'label' => 'Files per message', 'group' => 'files'],
         'file_max_mb' => ['default' => 15, 'type' => 'int', 'rules' => ['integer', 'between:1,100'], 'label' => 'Maximum file size (MB)', 'group' => 'files'],
         'sensitive_data_mode' => ['default' => 'warn', 'rules' => ['string', 'in:warn,block'], 'label' => 'Sensitive data handling', 'group' => 'security'],

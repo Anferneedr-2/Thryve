@@ -2,14 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Ai\AgentService;
 use App\Ai\AgentRunner;
+use App\Ai\AgentService;
 use App\Http\Responses\Api;
 use App\Models\Agent;
 use App\Models\AgentCheck;
+use App\Models\User;
+use App\Support\AgentAvatar;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -36,15 +39,18 @@ class AgentController extends Controller
 
         return Api::ok(AgentCheck::where('agent_id', $a->id)->orderByDesc('id')->limit(20)->get()->map(fn ($c) => [
             'id' => $c->id, 'kind' => $c->kind, 'category' => $c->category, 'ok' => $c->ok, 'latency_ms' => $c->latency_ms,
-            'tokens' => $c->tokens, 'by' => $c->user_id ? \App\Models\User::whereKey($c->user_id)->value('name') : null, 'at' => $c->created_at->toIso8601String(),
+            'tokens' => $c->tokens, 'by' => $c->user_id ? User::whereKey($c->user_id)->value('name') : null, 'at' => $c->created_at->toIso8601String(),
         ]));
     }
 
     public function store(Request $request): JsonResponse
     {
-        $d = $request->validate($this->rules(), $this->messages());
+        $d = $request->validate($this->rules() + ['type' => ['sometimes', Rule::in([Agent::TYPE_CHAT, Agent::TYPE_REPORT])]], $this->messages());
         if ($bad = $this->addressProblem($d['base_url'])) {
             return Api::error('validation_failed', $bad, 422, ['base_url' => [$bad]]);
+        }
+        if (($d['type'] ?? Agent::TYPE_CHAT) === Agent::TYPE_REPORT && Agent::active()->report()->exists()) {
+            return Api::error('report_agent_exists', 'A report agent is already set up. Remove it first if you want to replace it.', 422, ['type' => ['Only one report agent can be set up.']]);
         }
         $made = $this->agents->create($request->user(), $d);
 
@@ -58,6 +64,9 @@ class AgentController extends Controller
         if (isset($d['base_url']) && ($bad = $this->addressProblem($d['base_url']))) {
             return Api::error('validation_failed', $bad, 422, ['base_url' => [$bad]]);
         }
+        if ($a->isReport() && ! empty($d['is_default'])) {
+            return Api::error('validation_failed', 'A report agent is not a chatbot, so it cannot be the default.', 422, ['is_default' => ['A report agent cannot be the default chatbot.']]);
+        }
         if (($d['is_default'] ?? null) === false && $a->is_default) {
             return Api::error('validation_failed', 'Choose another agent as the default instead.', 422, ['is_default' => ['Choose another agent as the default instead.']]);
         }
@@ -65,7 +74,7 @@ class AgentController extends Controller
             return Api::error('default_agent', 'Chat uses the default agent. Make another agent the default before disabling this one.', 422);
         }
         $addressChanged = (isset($d['base_url']) && rtrim($d['base_url'], '/') !== $a->base_url) || (array_key_exists('profile', $d) && ($d['profile'] ?? null) !== $a->profile);
-        \Illuminate\Support\Facades\DB::transaction(function () use ($a, $d, $addressChanged) {
+        DB::transaction(function () use ($a, $d, $addressChanged) {
             if (! empty($d['is_default'])) {
                 Agent::where('id', '!=', $a->id)->update(['is_default' => false]);
             }
@@ -136,7 +145,7 @@ class AgentController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         $a = $this->find($id);
-        if ($a->is_default && Agent::active()->count() > 1) {
+        if ($a->is_default && Agent::active()->chat()->count() > 1) {
             return Api::error('default_agent', 'Make another agent the default before removing this one.', 422);
         }
         $this->agents->revoke($a, $request->user());
@@ -211,8 +220,8 @@ class AgentController extends Controller
     private function present(Agent $a): array
     {
         return [
-            'id' => $a->id, 'name' => $a->name, 'slug' => $a->slug, 'base_url' => $a->base_url, 'profile' => $a->profile, 'description' => $a->description, 'url' => $a->url(),
-            'avatar' => \App\Support\AgentAvatar::url($a->id),
+            'id' => $a->id, 'type' => $a->type, 'name' => $a->name, 'slug' => $a->slug, 'base_url' => $a->base_url, 'profile' => $a->profile, 'description' => $a->description, 'url' => $a->url(),
+            'avatar' => AgentAvatar::url($a->id),
             'is_enabled' => $a->is_enabled, 'is_default' => $a->is_default, 'status' => $a->status,
             'last_checked_at' => $a->last_checked_at?->toIso8601String(), 'last_latency_ms' => $a->last_latency_ms,
             'has_key' => $a->outbound_key !== null, 'key_fingerprint' => $a->outbound_fingerprint,

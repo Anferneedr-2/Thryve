@@ -144,9 +144,9 @@ class ChatService
     private function agentFor(Conversation $c): ?Agent
     {
         if ($c->agent_id) {
-            return Agent::active()->find($c->agent_id);
+            return Agent::active()->chat()->find($c->agent_id);
         }
-        $default = Agent::active()->where('is_default', true)->first();
+        $default = Agent::active()->chat()->where('is_default', true)->first();
         if ($default) {
             $c->update(['agent_id' => $default->id]);
         }
