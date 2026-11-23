@@ -41,7 +41,9 @@ final class GeneratedFiles
      */
     public static function autoInstruction(): string
     {
-        return 'Answer in normal chat text by default, and format it nicely. Only when the person clearly asks for a downloadable file '
+        return 'Answer in normal chat text by default, and format it nicely. '
+            .'When the person gives status-update, report or plan material (any two of progress, numbers or metrics, risks, blockers, decisions, next steps), always format the reply as Markdown: `##` headings for each section, `-` bullets, `**bold**` on the blocker or required action, and a pipe table (header row, `|---|` separator row) for comparable numbers. Never draw a table with spaces or tabs. Short or telegraphic input does not make this optional. Short emails and explicit format requests stay plain. '
+            .'Only when the person clearly asks for a downloadable file '
             .'(CSV, Markdown, Word, Excel, PDF or PowerPoint) should you create one: write a short note in plain text, then add exactly ONE block like this, with the fence word '.self::BLOCK.' and valid JSON inside, no links or paths: '
             .'```'.self::BLOCK."\n".'{"format":"docx","name":"report","title":"Title","paragraphs":["Plain text paragraphs"],"rows":[["Header","Value"],["Item",123]],"slides":[{"title":"Slide title","bullets":["Point"]}]}'."\n```\n"
             .'"format" is one of csv, md, docx, xlsx, pdf, pptx. For csv/xlsx supply rows; for pptx supply slides; for md/docx/pdf supply paragraphs. '
