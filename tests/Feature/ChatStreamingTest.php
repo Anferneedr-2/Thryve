@@ -161,6 +161,24 @@ class ChatStreamingTest extends TestCase
         $this->assertDatabaseHas('usage_records', ['status' => 'failed', 'is_estimate' => true]);
     }
 
+    public function test_provider_limit_notice_sent_as_answer_text_is_not_saved_as_an_answer(): void
+    {
+        $this->mock(StreamTransport::class, function ($mock) {
+            $mock->shouldReceive('read')->andReturnUsing(function ($url, $headers, $payload, $timeout, $receive) {
+                $notice = 'ChatGPT or Codex Subscription rate-limited every one of 3 attempts. Send /retry after that. Provider said: HTTP 429: The usage limit has been reached';
+                $receive('data: '.json_encode(['choices' => [['delta' => ['content' => $notice], 'finish_reason' => 'stop']]])."\n\n");
+                $receive("data: [DONE]\n\n");
+
+                return false;
+            });
+        });
+        $cookie = $this->cookieFor(Role::EMPLOYEE);
+        $r = $this->device($cookie)->postJson('/api/chat', ['message' => 'Explain'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()]);
+        $this->assertStringContainsString('event: failure', $r->streamedContent());
+        $this->assertDatabaseMissing('messages', ['role' => 'assistant']);
+        $this->assertDatabaseHas('usage_records', ['status' => 'failed']);
+    }
+
     public function test_unfinished_stream_is_not_silently_treated_as_success(): void
     {
         $this->mock(StreamTransport::class, function ($mock) {

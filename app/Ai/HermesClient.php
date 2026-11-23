@@ -46,7 +46,7 @@ class HermesClient
             $usage = $decoder->usage;
             $estimate = $usage === null;
 
-            return ['content' => $decoder->content, 'input' => $usage['input'] ?? (int) ceil(strlen(json_encode($messages)) / 4), 'output' => $usage['output'] ?? (int) ceil(strlen($decoder->content) / 4), 'estimate' => $estimate, 'finish' => $finish ?? $decoder->finish, 'model' => $target['model'] ?? null];
+            $result = ['content' => $decoder->content, 'input' => $usage['input'] ?? (int) ceil(strlen(json_encode($messages)) / 4), 'output' => $usage['output'] ?? (int) ceil(strlen($decoder->content) / 4), 'estimate' => $estimate, 'finish' => $finish ?? $decoder->finish, 'model' => $target['model'] ?? null];
         } catch (ProviderException $e) {
             if ($e->ambiguous || $decoder->content !== '') {
                 throw new ProviderException($e->category, $e->retryable, true, $decoder->usage['input'] ?? (int) ceil(strlen(json_encode($messages)) / 4), $decoder->usage['output'] ?? (int) ceil(strlen($decoder->content) / 4), $decoder->content, $decoder->usage === null);
@@ -54,6 +54,27 @@ class HermesClient
             throw $e;
         } catch (ConnectionException) {
             throw new ProviderException('timeout', ambiguous: true, partialContent: $decoder->content);
+        }
+
+        $this->rejectProviderNotice($result['content']);
+
+        return $result;
+    }
+
+    /**
+     * Hermes sometimes reports a provider failure (for example a usage limit) as ordinary answer text with a normal finish.
+     * Treat that as a failed call so employees never see provider or tooling details and nothing is saved as an answer.
+     */
+    public static function looksLikeProviderNotice(string $content): bool
+    {
+        return strlen($content) < 1500
+            && preg_match('/rate-limited every one of \d+ attempts|Provider said: HTTP \d{3}|hermes fallback add|Send \/retry after that/i', $content) === 1;
+    }
+
+    private function rejectProviderNotice(string $content): void
+    {
+        if (self::looksLikeProviderNotice($content)) {
+            throw new ProviderException(self::classifyError($content), retryable: true, ambiguous: false, inputTokens: 0, outputTokens: 0, partialContent: '');
         }
     }
 
@@ -228,6 +249,8 @@ class HermesClient
         if (trim($content) === '') {
             throw new ProviderException('bad_response', retryable: true, ambiguous: $input + $output > 0, inputTokens: $input, outputTokens: $output);
         }
+
+        $this->rejectProviderNotice($content);
 
         $estimate = false;
         if ($input + $output === 0) {
