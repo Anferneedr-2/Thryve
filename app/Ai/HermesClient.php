@@ -30,9 +30,7 @@ class HermesClient
             if ($key = $target['key'] ?? config('services.hermes.key')) {
                 $headers[] = 'Authorization: Bearer '.$key;
             }
-            if ($sessionId) {
-                $headers[] = 'X-Hermes-Session-Id: '.$sessionId;
-            }
+            // No X-Hermes-Session-Id: Hermes then ignores the history sent below and the agent forgets earlier turns.
             $cancelled = app(StreamTransport::class)->read(rtrim($target['url'] ?? (string) config('services.hermes.url'), '/').'/v1/chat/completions', $headers, [
                 'model' => $target['model'] ?? config('services.hermes.model'), 'messages' => $messages, 'stream' => true, 'stream_options' => ['include_usage' => true],
             ], $timeout, fn ($bytes) => $decoder->feed($bytes), $stop);
@@ -177,9 +175,7 @@ class HermesClient
             if ($key) {
                 $request = $request->withToken($key);
             }
-            if ($sessionId) {
-                $request = $request->withHeaders(['X-Hermes-Session-Id' => $sessionId]);
-            }
+            // No X-Hermes-Session-Id: Hermes then ignores the history sent below and the agent forgets earlier turns.
             $response = $request->post($url, [
                 'model' => $model,
                 'messages' => $messages,

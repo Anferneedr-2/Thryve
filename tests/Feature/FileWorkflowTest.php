@@ -54,7 +54,7 @@ class FileWorkflowTest extends TestCase
         $id = $this->device($cookie)->post('/api/attachments', ['file' => $image], ['Accept' => 'application/json'])->assertCreated()->json('data.id');
         $this->response('A sample chart.');
         $this->device($cookie)->postJson('/api/chat', ['message' => 'Describe this chart', 'attachment_ids' => [$id]])->assertOk();
-        Http::assertSent(fn ($r) => collect($r['messages'])->contains(fn ($m) => is_array($m['content']) && str_starts_with($m['content'][1]['image_url']['url'] ?? '', 'data:image/png;base64,')) && filled($r->header('X-Hermes-Session-Id')));
+        Http::assertSent(fn ($r) => collect($r['messages'])->contains(fn ($m) => is_array($m['content']) && str_starts_with($m['content'][1]['image_url']['url'] ?? '', 'data:image/png;base64,')) && ! $r->hasHeader('X-Hermes-Session-Id'));
         $this->device($cookie)->post('/api/attachments', ['file' => UploadedFile::fake()->createWithContent('fake.png', 'not an image')], ['Accept' => 'application/json'])->assertStatus(422);
     }
 
