@@ -59,7 +59,7 @@ class SettingsController extends Controller
             Cache::forever('smtp:last_test', ['ok' => false, 'category' => $category, 'at' => now()->toIso8601String()]);
             Audit::log('settings.smtp_tested', $request->user(), null, ['ok' => false, 'category' => $category]);
 
-            return Api::ok(['ok' => false, 'category' => $category, 'message' => MailConfigurator::describe($category)]);
+            return Api::ok(['ok' => false, 'category' => $category, 'message' => MailConfigurator::describe($category, Settings::get('smtp_host'))]);
         }
     }
 }

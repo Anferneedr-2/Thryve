@@ -93,7 +93,7 @@ class HealthChecker
             return ['warn', 'Set up, but no test email has been sent yet.'];
         }
 
-        return $last['ok'] ? ['ok', 'The last test email was sent.'] : ['fail', 'The last test email failed: '.MailConfigurator::describe($last['category'])];
+        return $last['ok'] ? ['ok', 'The last test email was sent.'] : ['fail', 'The last test email failed: '.MailConfigurator::describe($last['category'], Settings::get('smtp_host'))];
     }
 
     private function scheduler(): array

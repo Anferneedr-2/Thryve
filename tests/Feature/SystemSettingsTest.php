@@ -180,6 +180,42 @@ class SystemSettingsTest extends TestCase
         $this->assertTrue(\App\Mail\MailConfigurator::enabled() === false, 'saving details does not switch email on by itself');
     }
 
+    public function test_a_gmail_login_failure_explains_the_app_password_without_showing_the_host(): void
+    {
+        $gmail = \App\Mail\MailConfigurator::describe('auth_failed', 'smtp.gmail.com');
+        $this->assertStringContainsString('App Password', $gmail);
+        $this->assertStringContainsString('did not accept the username or password', $gmail);
+        $this->assertStringNotContainsString('smtp.gmail.com', $gmail);
+
+        $other = \App\Mail\MailConfigurator::describe('auth_failed', 'smtp.example.com');
+        $this->assertStringNotContainsString('App Password', $other);
+        $this->assertStringNotContainsString('App Password', \App\Mail\MailConfigurator::describe('auth_failed'));
+        $this->assertStringNotContainsString('App Password', \App\Mail\MailConfigurator::describe('connection_failed', 'smtp.gmail.com'));
+    }
+
+    public function test_a_certificate_failure_is_reported_as_a_secure_connection_problem_not_a_connection_problem(): void
+    {
+        $cert = new \RuntimeException('Connection could not be established with host "smtp.example.com:587": stream_socket_client(): SSL operation failed with code 1. OpenSSL Error messages: certificate verify failed');
+        $refused = new \RuntimeException('Connection could not be established with host "ssl://smtp.example.com:465": Unable to connect (connection refused)');
+        $login = new \RuntimeException('Failed to authenticate on SMTP server. Expected response code "235" but got code "535"');
+
+        $this->assertSame('tls_failed', \App\Mail\MailConfigurator::category($cert));
+        $this->assertSame('connection_failed', \App\Mail\MailConfigurator::category($refused));
+        $this->assertSame('auth_failed', \App\Mail\MailConfigurator::category($login));
+    }
+
+    public function test_port_465_always_uses_a_secure_connection_from_the_start(): void
+    {
+        $c = $this->superCookie();
+        $this->device($c)->patchJson('/api/settings', ['smtp_host' => 'smtp.example.com', 'smtp_port' => 465, 'smtp_encryption' => 'tls'])->assertOk();
+        \App\Mail\MailConfigurator::apply();
+        $this->assertSame('smtps', config('mail.mailers.smtp.scheme'));
+
+        $this->device($c)->patchJson('/api/settings', ['smtp_port' => 587])->assertOk();
+        \App\Mail\MailConfigurator::apply();
+        $this->assertSame('smtp', config('mail.mailers.smtp.scheme'));
+    }
+
     // ---- branding ------------------------------------------------------------------------------
 
     public function test_branding_is_public_and_reflects_settings(): void
