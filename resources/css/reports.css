@@ -38,3 +38,5 @@
 @media(max-width:767px){.rp-trend text{font-size:24px}}
 .rp-recs{display:grid;gap:12px}.rp-person .rp-text-button{font-weight:600}
 .rp-intro>.sl-btn{flex-shrink:0;white-space:nowrap}
+.rp-matches{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}.rp-matches button{border:1px solid var(--sl-line);background:var(--surface);color:var(--sl-heading);border-radius:999px;min-height:36px;padding:6px 14px;font:600 13px var(--font-body);cursor:pointer}.rp-matches button:hover{border-color:var(--brand);color:var(--brand)}.rp-matches button.on{background:var(--blue-100);border-color:var(--brand);color:var(--blue-600)}.rp-matches button:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+@media(max-width:767px){.rp-matches button{min-height:44px}}

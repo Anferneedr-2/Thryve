@@ -31,15 +31,18 @@ export default function ReportFilters({ search, busy, onApply }) {
     const users = [...(options?.data.users ?? [])];
     const selected = options?.data.selected_user;
     if (selected && !users.some((u) => u.id === selected.id)) users.unshift(selected);
-    const apply = (e) => {
-        e.preventDefault();
+    const build = (d) => {
         const params = new URLSearchParams();
-        if (draft.from || draft.to) { if (draft.from) params.set('from', draft.from); if (draft.to) params.set('to', draft.to); }
-        else params.set('days', draft.days);
-        if (draft.user_id) params.set('user_id', draft.user_id);
-        if (draft.department_id) params.set('department_id', draft.department_id);
-        onApply(params.toString());
+        if (d.from || d.to) { if (d.from) params.set('from', d.from); if (d.to) params.set('to', d.to); }
+        else params.set('days', d.days);
+        if (d.user_id) params.set('user_id', d.user_id);
+        if (d.department_id) params.set('department_id', d.department_id);
+        return params.toString();
     };
+    const apply = (e) => { e.preventDefault(); onApply(build(draft)); };
+    // Picking a match from the search results selects that person and applies the filter in one step.
+    const choose = (u) => { setQuery(''); setPage(1); onApply(build({ ...draft, user_id: String(u.id) })); };
+    const matches = query.trim() && !loading ? (options?.data.users ?? []) : null;
     return <form onSubmit={apply} className="sl-card rp-filters" aria-label="Report filters">
         <div className="rp-filter-top"><span className="rp-label">REPORT PERIOD</span><div className="rp-presets" aria-label="Date presets">{[7, 30, 90].map((n) => <button key={n} type="button" className={draft.days === String(n) && !draft.from && !draft.to ? 'on' : ''} aria-pressed={draft.days === String(n) && !draft.from && !draft.to} onClick={() => setDraft((d) => ({ ...d, days: String(n), from: '', to: '' }))}>{n} days</button>)}</div></div>
         <div className="rp-filter-grid">
@@ -50,6 +53,15 @@ export default function ReportFilters({ search, busy, onApply }) {
             <Button type="submit" variant="primary" disabled={busy}>Apply filters</Button>
         </div>
         <div className="rp-search-row"><label>Find a person<input className="sl-input" type="search" placeholder="Search name or username" value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} /></label><div className="rp-option-pages" aria-live="polite"><span>{loading ? 'Loading people…' : `${options?.meta.total ?? 0} people · page ${options?.meta.page ?? 1} of ${Math.max(1, options?.meta.last_page ?? 1)}`}</span><button type="button" aria-label="Previous people options" disabled={loading || page === 1} onClick={() => setPage((p) => p - 1)}>←</button><button type="button" aria-label="Next people options" disabled={loading || page >= (options?.meta.last_page ?? 1)} onClick={() => setPage((p) => p + 1)}>→</button></div><span className="rp-membership">Department filters use current membership.</span></div>
+        {matches && (
+            <div className="rp-matches" role="group" aria-label="People matching your search" aria-live="polite">
+                {matches.length === 0 ? <span className="rp-muted">No one matches "{query.trim()}".</span> : <>
+                    <span className="rp-muted">Choose a person:</span>
+                    {matches.map((u) => <button key={u.id} type="button" className={String(u.id) === draft.user_id ? 'on' : ''} aria-pressed={String(u.id) === draft.user_id} onClick={() => choose(u)}>{u.name}{u.is_active ? '' : ' (inactive)'}</button>)}
+                    {(options?.meta.last_page ?? 1) > 1 && <span className="rp-muted">More people match. Keep typing to narrow the list.</span>}
+                </>}
+            </div>
+        )}
         {error && <Alert tone="danger" title="Could not load filter options">{error} <button type="button" onClick={() => setAttempt((n) => n + 1)}>Retry options</button></Alert>}
     </form>;
 }
