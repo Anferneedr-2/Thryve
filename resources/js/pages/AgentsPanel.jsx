@@ -4,7 +4,7 @@ import AgentAvatar from '../components/chat/AgentAvatar';
 import { errorText, formatDateTime } from '../lib/util';
 import { Table } from '../components/ui/Layout';
 import { Button } from '../components/ui/Button';
-import { TextField } from '../components/ui/Form';
+import { SelectField, TextField } from '../components/ui/Form';
 import { Alert, EmptyState, ErrorState, Pill, Skeleton, useToast } from '../components/ui/Feedback';
 import { ConfirmDialog, Dialog, Menu } from '../components/ui/Overlay';
 
@@ -44,11 +44,11 @@ function KeyReveal({ reveal, onClose }) {
                 <Alert tone="warning" title="Copy these now">They are shown only once and cannot be viewed again. If you lose one, create a new one.</Alert>
                 {keys.outbound && (
                     <>
-                        <CopyBox label="1. Access key for the agent. On the VPS, put this in the Hermes .env (main and profile) and restart the gateway:" value={`API_SERVER_KEY=${keys.outbound}`} />
+                        <CopyBox label={`${keys.inbound && agent.type !== 'report' ? '1. ' : ''}Access key for the agent. On the VPS, put this in the Hermes .env (main and profile) and restart the gateway:`} value={`API_SERVER_KEY=${keys.outbound}`} />
                         <p className="sl-help">Then come back here and press Test{reveal.rotating ? ' (or "Verify and activate" for a rotation)' : ''}.</p>
                     </>
                 )}
-                {keys.inbound && (
+                {keys.inbound && agent.type !== 'report' && (
                     <CopyBox label={`${keys.outbound ? '2. ' : ''}Key for the agent to call this system. Send it as a Bearer token to ${window.location.origin}/api/agent/ping:`} value={keys.inbound} />
                 )}
                 <p className="sl-help">Agent: {agent.name}</p>
@@ -89,7 +89,8 @@ function AvatarField({ agent, onChanged }) {
 }
 
 function AgentForm({ agent, onClose, onSaved, onAvatar }) {
-    const [form, setForm] = useState({ name: agent?.name ?? '', base_url: agent?.base_url ?? '', profile: agent?.profile ?? '', description: agent?.description ?? '' });
+    const [form, setForm] = useState({ type: agent?.type ?? 'chat', name: agent?.name ?? '', base_url: agent?.base_url ?? '', profile: agent?.profile ?? '', description: agent?.description ?? '' });
+    const report = form.type === 'report';
     const [errors, setErrors] = useState({});
     const [formError, setFormError] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -98,7 +99,8 @@ function AgentForm({ agent, onClose, onSaved, onAvatar }) {
         e.preventDefault();
         setBusy(true); setErrors({}); setFormError(null);
         try {
-            const body = { name: form.name.trim(), base_url: form.base_url.trim(), profile: form.profile.trim() || null, description: form.description.trim() || null };
+            const body = { name: form.name.trim(), base_url: form.base_url.trim(), profile: form.profile.trim() || null, description: report ? null : form.description.trim() || null };
+            if (!agent) body.type = form.type;
             const saved = await send(agent ? 'PATCH' : 'POST', agent ? `/agents/${agent.id}` : '/agents', body);
             onSaved(saved, !agent);
         } catch (err) {
@@ -111,13 +113,18 @@ function AgentForm({ agent, onClose, onSaved, onAvatar }) {
             actions={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" form="agent-form" disabled={busy || !form.name || !form.base_url}>{busy ? 'Saving...' : agent ? 'Save' : 'Add and create keys'}</Button></>}>
             <form id="agent-form" onSubmit={submit} className="grid gap-4" noValidate>
                 {formError && <Alert tone="danger" title="Could not save">{formError}</Alert>}
-                <TextField label="Name" value={form.name} onChange={set('name')} error={errors.name} placeholder="General Assistant" />
+                <SelectField label="What is this agent for?" value={form.type} onChange={set('type')} error={errors.type} disabled={!!agent}
+                    help={agent ? 'The type cannot be changed after the agent is created.' : report ? 'Report: a background agent that analyzes finished conversations for the reports. Nobody chats with it, and it never appears in the chat list.' : 'Chat: a chatbot people talk to. Every chat agent appears in the chat list for the people you give it to.'}>
+                    <option value="chat">Chat: a chatbot people talk to</option>
+                    <option value="report">Report: background analysis for the reports</option>
+                </SelectField>
+                <TextField label="Name" value={form.name} onChange={set('name')} error={errors.name} placeholder={report ? 'Report AI' : 'General Assistant'} />
                 <TextField label="Server address" value={form.base_url} onChange={set('base_url')} error={errors.base_url} placeholder="https://ai.yourcompany.com" help="Where Hermes runs. Use https:// (http:// is allowed only on this computer)." />
-                <TextField label="Profile name" value={form.profile} onChange={set('profile')} error={errors.profile} placeholder="thryve-bot" help="The Hermes profile this agent uses. Leave empty if the server serves one agent at its address." />
-                <TextField label="Description for employees (optional)" value={form.description} onChange={set('description')} error={errors.description} maxLength={200} placeholder="Helps with everyday writing and questions" help="Shown when someone picks this chatbot." />
+                <TextField label="Profile name" value={form.profile} onChange={set('profile')} error={errors.profile} placeholder={report ? 'report-ai' : 'thryve-bot'} help="The Hermes profile this agent uses. Leave empty if the server serves one agent at its address." />
+                {!report && <TextField label="Description for employees (optional)" value={form.description} onChange={set('description')} error={errors.description} maxLength={200} placeholder="Helps with everyday writing and questions" help="Shown when someone picks this chatbot." />}
                 {agent && <p className="sl-help">Changing the address or profile resets the status until you test again.</p>}
             </form>
-            {agent && <div className="mt-4"><AvatarField agent={agent} onChanged={(r) => onAvatar(r.avatar)} /></div>}
+            {agent && !report && <div className="mt-4"><AvatarField agent={agent} onChanged={(r) => onAvatar(r.avatar)} /></div>}
         </Dialog>
     );
 }
@@ -148,9 +155,10 @@ function AgentCard({ a, canManage, busyId, run, ask, edit, history }) {
                 <div className="flex items-start gap-3">
                 <AgentAvatar agent={a} agents={null} />
                 <div className="grid gap-1">
-                    <h5 className="flex flex-wrap items-center gap-2">{a.name}{a.is_default && <Pill tone="info">Default</Pill>}{!a.is_enabled && <Pill>Disabled</Pill>}</h5>
+                    <h5 className="flex flex-wrap items-center gap-2">{a.name}{a.type === 'report' && <Pill tone="info">Report</Pill>}{a.is_default && <Pill tone="info">Default</Pill>}{!a.is_enabled && <Pill>Disabled</Pill>}</h5>
                     <span className="sl-help" style={{ overflowWrap: 'anywhere' }}>{a.url}</span>
                     {a.description && <span className="sl-help">{a.description}</span>}
+                    {a.type === 'report' && <span className="sl-help">Background analysis for the reports. Not a chatbot: it never appears in the chat list.</span>}
                 </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -161,8 +169,8 @@ function AgentCard({ a, canManage, busyId, run, ask, edit, history }) {
                         <Menu label={`Actions for ${a.name}`} items={[
                             { label: 'Test with a message (uses tokens)', icon: 'chat', onSelect: () => ask({ kind: 'message', a }) },
                             { label: 'Rotate key', icon: 'refresh', onSelect: () => run(a, 'rotate') },
-                            { label: 'New key for the agent to call us', icon: 'share', onSelect: () => ask({ kind: 'inbound', a }) },
-                            ...(a.is_default ? [] : [{ label: 'Make default', icon: 'star', onSelect: () => run(a, 'default') }]),
+                            ...(a.type === 'report' ? [] : [{ label: 'New key for the agent to call us', icon: 'share', onSelect: () => ask({ kind: 'inbound', a }) }]),
+                            ...(a.is_default || a.type === 'report' ? [] : [{ label: 'Make default', icon: 'star', onSelect: () => run(a, 'default') }]),
                             ...(a.is_default ? [] : [{ label: a.is_enabled ? 'Disable' : 'Enable', icon: 'eye', onSelect: () => run(a, 'toggle') }]),
                             { label: 'Edit', icon: 'edit', onSelect: () => edit(a) },
                             { label: 'Revoke keys', icon: 'x', onSelect: () => ask({ kind: 'revoke', a }) },
@@ -179,8 +187,8 @@ function AgentCard({ a, canManage, busyId, run, ask, edit, history }) {
             <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2" style={{ margin: 0 }}>
                 <div><dt className="sl-help">Access key</dt><dd className="tnum">{a.has_key ? `Ends in ${a.key_fingerprint}` : 'None (revoked)'}</dd></div>
                 <div><dt className="sl-help">Last tested</dt><dd>{a.last_checked_at ? `${formatDateTime(a.last_checked_at)}${a.last_latency_ms !== null ? ` · ${a.last_latency_ms} ms` : ''}` : 'Never'}</dd></div>
-                <div><dt className="sl-help">Agent calling this system</dt><dd>{a.inbound_last_seen_at ? formatDateTime(a.inbound_last_seen_at) : a.inbound_fingerprint ? 'Not heard from yet' : 'No key issued'}</dd></div>
-                <div><dt className="sl-help">Key to call this system</dt><dd className="tnum">{a.inbound_fingerprint ? `Ends in ${a.inbound_fingerprint}` : 'None'}</dd></div>
+                {a.type !== 'report' && <div><dt className="sl-help">Agent calling this system</dt><dd>{a.inbound_last_seen_at ? formatDateTime(a.inbound_last_seen_at) : a.inbound_fingerprint ? 'Not heard from yet' : 'No key issued'}</dd></div>}
+                {a.type !== 'report' && <div><dt className="sl-help">Key to call this system</dt><dd className="tnum">{a.inbound_fingerprint ? `Ends in ${a.inbound_fingerprint}` : 'None'}</dd></div>}
             </dl>
             {a.pending_fingerprint && (
                 <Alert tone="warning" title="A new key is waiting">
@@ -254,7 +262,7 @@ export default function AgentsPanel({ canManage }) {
     return (
         <>
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="sl-help" style={{ maxWidth: 640 }}>An agent is an AI profile running on your Hermes server. This system creates its access key; you install the key on the server, then press Test. Nothing is tested automatically.</p>
+                <p className="sl-help" style={{ maxWidth: 640 }}>An agent is an AI profile running on your Hermes server. This system creates its access key; you install the key on the server, then press Test. Nothing is tested automatically. A Chat agent is a chatbot people talk to; a Report agent works in the background for the reports and never appears in chat.</p>
                 {canManage && <Button variant="primary" icon="plus" onClick={() => setForm({})}>Add agent</Button>}
             </div>
             {result && <Alert tone={result.ok ? 'success' : 'danger'} title={result.ok ? 'Test passed' : 'Test failed'}><p role="status">{result.text}</p></Alert>}

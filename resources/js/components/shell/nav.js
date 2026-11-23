@@ -7,6 +7,7 @@ export function railItems(user) {
     const items = [
         { id: '/chat', label: 'Chat', icon: 'chat' },
         { id: '/attendance', label: 'Attendance', icon: 'clock' },
+        { id: '/scores', label: 'Scores', icon: 'star', title: 'My prompt scores' },
     ];
     if (isAdmin(user)) {
         items.push(

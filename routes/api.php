@@ -4,6 +4,8 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\AgentAccessController;
 use App\Http\Controllers\AgentAvatarController;
 use App\Http\Controllers\AgentController;
+use App\Http\Controllers\AnalysisReportController;
+use App\Http\Controllers\AnalysisTopicController;
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\AttendanceAdminController;
 use App\Http\Controllers\AttendanceController;
@@ -85,6 +87,9 @@ Route::middleware(['web', 'installed'])->group(function () {
             // Own token allowance (never any provider detail).
             Route::get('/usage/today', [UsageController::class, 'mine']);
 
+            // Own prompt scores (never anyone else's; the server uses the signed-in person).
+            Route::get('/analysis/mine', [AnalysisReportController::class, 'mine'])->middleware('throttle:reports-read');
+
             // Own attendance (never anyone else's).
             Route::post('/attendance/heartbeat', [AttendanceController::class, 'heartbeat'])->middleware('throttle:20,1');
             Route::post('/attendance/close', [AttendanceController::class, 'close']);
@@ -100,12 +105,17 @@ Route::middleware(['web', 'installed'])->group(function () {
                     Route::get('/usage', [ReportController::class, 'usage']);
                     Route::get('/quality', [ReportController::class, 'quality']);
                     Route::get('/adoption', [ReportController::class, 'adoption']);
+                    Route::get('/analysis', [AnalysisReportController::class, 'report']);
                     Route::get('/conversations', [ReportController::class, 'conversations']);
                     Route::get('/conversations/{conversation}', [ReportController::class, 'inspect'])->whereNumber('conversation');
                     Route::get('/conversations/{conversation}/attachments/{attachment}', [ReportController::class, 'download'])->whereNumber(['conversation', 'attachment']);
                     Route::get('/audit', [ReportController::class, 'audit']);
                     Route::get('/export', [ReportController::class, 'export'])->middleware('throttle:reports-export');
                 });
+                // The topic list the report agent chooses from.
+                Route::get('/analysis/topics', [AnalysisTopicController::class, 'index']);
+                Route::post('/analysis/topics', [AnalysisTopicController::class, 'store']);
+                Route::patch('/analysis/topics/{id}', [AnalysisTopicController::class, 'update'])->whereNumber('id');
                 Route::get('/users', [UserController::class, 'index']);
                 Route::post('/users', [UserController::class, 'store']);
                 Route::get('/users/{user}', [UserController::class, 'show']);

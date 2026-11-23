@@ -30,6 +30,7 @@ import PolicyAck from './pages/PolicyAck';
 import TokenGallery from './pages/TokenGallery';
 import AnswerGallery from './pages/AnswerGallery';
 import Reports from './pages/Reports';
+import MyScores from './pages/MyScores';
 
 const ADMIN_ONLY = ['/people', '/agents', '/settings', '/attendance/team', '/reports'];
 const under = (path, base) => path === base || path.startsWith(`${base}/`);
@@ -44,11 +45,15 @@ const sections = (user) => {
             { id: 'usage', path: '/reports/usage', label: 'Usage & cost', node: <Reports view="usage" /> },
             { id: 'quality', path: '/reports/quality', label: 'Quality', node: <Reports view="quality" /> },
             { id: 'adoption', path: '/reports/adoption', label: 'Adoption', node: <Reports view="adoption" /> },
+            { id: 'tasks', path: '/reports/tasks', label: 'Tasks & topics', node: <Reports view="tasks" /> },
+            { id: 'prompts', path: '/reports/prompts', label: 'Prompt quality', node: <Reports view="prompts" /> },
             { id: 'attendance', path: '/reports/attendance', label: 'Attendance', node: <Reports view="attendance" /> },
             { id: 'people', path: '/reports/people', label: 'People', node: <Reports view="people" /> },
             { id: 'conversations', path: '/reports/conversations', label: 'Conversations', node: <Reports view="conversations" /> },
             { id: 'audit', path: '/reports/audit', label: 'Audit', node: <Reports view="audit" /> },
+            { id: 'topics', path: '/reports/topics', label: 'Topics', node: <Reports view="topics" /> },
         ] },
+        '/scores': { title: 'My prompt scores', tabs: [{ id: 'scores', path: '/scores', label: 'My prompt scores', node: <MyScores /> }] },
         '/attendance': { title: 'Attendance', tabs: [{ id: 'mine', path: '/attendance', label: 'Mine', node: <Attendance /> }, ...(admin ? [{ id: 'team', path: '/attendance/team', label: 'Team', node: <TeamAttendance /> }] : [])] },
         '/people': admin && { title: 'People', tabs: [{ id: 'people', path: '/people', label: 'People', node: <People /> }, { id: 'departments', path: '/people/departments', label: 'Departments', node: <Departments /> }] },
         '/agents': admin && { title: 'AI agents', tabs: [

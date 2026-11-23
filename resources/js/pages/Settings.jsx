@@ -88,7 +88,7 @@ export default function Settings({ section = 'general' }) {
     const smtpSaved = !!loaded.smtp_host.value && !!loaded.smtp_from_address.value;
     const KEYS = {
         general: ['company_name', 'default_theme'],
-        work: ['idle_minutes', 'analysis_idle_minutes'],
+        work: ['idle_minutes', 'analysis_idle_minutes', 'analysis_enabled', 'analysis_batch_size'],
         files: ['file_max_count', 'file_max_mb'],
         tokens: ['default_daily_token_limit', 'system_daily_token_budget'],
         security: ['sensitive_data_mode'],
@@ -114,7 +114,15 @@ export default function Settings({ section = 'general' }) {
     </>);
     if (section === 'work') return form(<>
         <TextField label={L('idle_minutes')} type="number" min="1" value={values.idle_minutes} onChange={set('idle_minutes', num)} error={err('idle_minutes')} help="After this long without activity, time counts as idle. Nobody is signed out." />
-        <TextField label={L('analysis_idle_minutes')} type="number" min="1" value={values.analysis_idle_minutes} onChange={set('analysis_idle_minutes', num)} error={err('analysis_idle_minutes')} />
+        <TextField label={L('analysis_idle_minutes')} type="number" min="1" value={values.analysis_idle_minutes} onChange={set('analysis_idle_minutes', num)} error={err('analysis_idle_minutes')} help="A conversation is analyzed after it has been quiet this long." />
+        <div className="grid gap-3" style={{ borderTop: '1px solid var(--slate-200)', paddingTop: 16 }}>
+            <strong className="font-display" style={{ color: 'var(--sl-heading)' }}>Prompt quality and topics</strong>
+            <p className="sl-help" style={{ margin: 0 }}>When this is on, a background job sends finished conversations to your Report AI agent, which labels the task, picks topics and scores how the prompts were written. Results feed the Reports and each person's own scores page. Opening a report never calls the AI, and the cost is counted against the background budget, never against anyone's daily allowance.</p>
+            <Switch label={L('analysis_enabled')} checked={!!values.analysis_enabled} onChange={(e) => setValues((v) => ({ ...v, analysis_enabled: e.target.checked }))} />
+            {!!values.analysis_enabled && <Alert tone="info" title="It also needs a Report agent">Add an agent of type Report under AI agents and press Test connection. Until it is working, nothing is analyzed.</Alert>}
+            <TextField label={L('analysis_batch_size')} type="number" min="1" max="50" value={values.analysis_batch_size} onChange={set('analysis_batch_size', num)} error={err('analysis_batch_size')}
+                help="The job runs every five minutes. Keep this small: the Report agent shares the AI subscription with live chat." />
+        </div>
     </>);
     if (section === 'files') return form(<>
         <TextField label={L('file_max_count')} type="number" min="1" value={values.file_max_count} onChange={set('file_max_count', num)} error={err('file_max_count')} />

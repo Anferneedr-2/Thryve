@@ -5,12 +5,13 @@ export const number = (n = 0) => new Intl.NumberFormat('en', { maximumFractionDi
 export const hours = (n = 0) => `${number(n / 3600)} h`;
 export const shortDate = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' });
 
-export function TrendChart({ rows, metric = 'tokens', label = 'Tokens', secondary, secondaryLabel, formatter = number, nullable = false }) {
+export function TrendChart({ rows, metric = 'tokens', label = 'Tokens', secondary, secondaryLabel, formatter = number, nullable = false, ceiling }) {
     const id = useId();
     const [hover, setHover] = useState(null);
     const selected = Math.min(hover ?? rows.length - 1, rows.length - 1);
     const max = Math.max(1, ...rows.map((r) => Math.max(r[metric] ?? 0, secondary ? r[secondary] ?? 0 : 0)));
-    const top = Math.ceil(max / (10 ** Math.floor(Math.log10(max)))) * (10 ** Math.floor(Math.log10(max)));
+    // A fixed top (a score out of 5) keeps the chart honest; otherwise round the largest value up.
+    const top = ceiling ?? Math.ceil(max / (10 ** Math.floor(Math.log10(max)))) * (10 ** Math.floor(Math.log10(max)));
     const x = (i) => 60 + (rows.length === 1 ? 288 : i * 576 / (rows.length - 1));
     const y = (v) => 180 - v / top * 152;
     const points = (key) => rows.map((r, i) => `${x(i)},${y(r[key] ?? 0)}`).join(' ');
