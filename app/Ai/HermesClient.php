@@ -20,7 +20,9 @@ class HermesClient
             throw new ProviderException('unavailable');
         }
         $decoder = new StreamDecoder(\Closure::fromCallable($emit));
-        $timeout = max(5, (int) config('services.hermes.timeout', 120));
+        // A streamed answer is not held to the short single-request timeout: by default Thryve waits until Hermes finishes.
+        $cap = (int) config('services.hermes.stream_max_seconds', 0);
+        $timeout = $cap > 0 ? max(30, $cap) : 0;
         $finish = null;
         try {
             if ($stop()) {

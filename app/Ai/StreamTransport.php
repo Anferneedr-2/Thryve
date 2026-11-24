@@ -5,6 +5,10 @@ namespace App\Ai;
 /** cURL callbacks allow Stop to interrupt waiting for headers as well as reading deltas. */
 class StreamTransport
 {
+    /**
+     * @param  int  $timeout  the longest the whole answer may take, in seconds; 0 waits for as long as Hermes keeps the connection
+     *                        open. A dead connection (the other side vanished) is still detected through TCP keep-alive.
+     */
     public function read(string $url, array $headers, array $payload, int $timeout, callable $receive, callable $stop): bool
     {
         $handle = curl_init($url);
@@ -56,6 +60,9 @@ class StreamTransport
                     return strlen($bytes);
                 },
             ]);
+            // No time limit does not mean waiting for a dead server forever: probe an idle connection so a vanished peer is noticed
+            // using the operating system's keep-alive failure detection, while a slow but alive answer is never cut.
+            curl_setopt_array($handle, [CURLOPT_TCP_KEEPALIVE => 1, CURLOPT_TCP_KEEPIDLE => 60, CURLOPT_TCP_KEEPINTVL => 30]);
             if ($ca = ini_get('curl.cainfo')) {
                 curl_setopt($handle, CURLOPT_CAINFO, $ca);
             }

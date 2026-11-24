@@ -11,6 +11,7 @@ use App\Models\UsageRecord;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -66,6 +67,118 @@ class ChatStreamingTest extends TestCase
             .'data: '.json_encode(['choices' => [['delta' => ['content' => '世界'], 'finish_reason' => 'stop']]])."\n\n"
             .'data: '.json_encode(['choices' => [], 'usage' => ['prompt_tokens' => 12, 'completion_tokens' => 5]])."\n\n"
             ."data: [DONE]\n\n";
+    }
+
+    /** What the client asked the transport to enforce: the longest the whole answer may take (0 = no limit). */
+    private function transportTimeout(): int
+    {
+        $seen = null;
+        $sse = $this->sse();
+        $this->mock(StreamTransport::class, function ($mock) use (&$seen, $sse) {
+            $mock->shouldReceive('read')->once()->andReturnUsing(function ($url, $headers, $payload, $timeout, $receive) use (&$seen, $sse) {
+                $seen = $timeout;
+                $receive($sse);
+
+                return false;
+            });
+        });
+        app(HermesClient::class)->stream([['role' => 'user', 'content' => 'Hi']], null, null, fn () => null, fn () => false);
+
+        return $seen;
+    }
+
+    public function test_a_streamed_answer_has_no_time_limit_by_default_and_is_not_held_to_the_short_request_timeout(): void
+    {
+        config(['services.hermes.timeout' => 60]); // the setting that used to cut every answer after a minute
+
+        $this->assertSame(0, $this->transportTimeout());
+    }
+
+    public function test_a_hard_cap_for_streamed_answers_can_still_be_set_in_the_environment_settings(): void
+    {
+        config(['services.hermes.stream_max_seconds' => 1500]);
+        $this->assertSame(1500, $this->transportTimeout());
+    }
+
+    public function test_a_hard_cap_is_never_shorter_than_thirty_seconds(): void
+    {
+        config(['services.hermes.stream_max_seconds' => 5]);
+        $this->assertSame(30, $this->transportTimeout());
+    }
+
+    public function test_the_one_chat_at_a_time_reservation_is_a_short_lease_when_the_request_starts(): void
+    {
+        [, $cookie] = $this->signIn($this->makeUser(Role::EMPLOYEE));
+
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertOk();
+
+        $lease = Carbon::parse(DB::table('chat_requests')->value('expires_at'));
+        $this->assertTrue($lease->between(now()->addSeconds(100), now()->addSeconds(130)), 'a lease of about two minutes, not a long fixed wait');
+    }
+
+    public function test_a_running_answer_renews_its_reservation_so_it_can_take_as_long_as_hermes_needs(): void
+    {
+        [, $cookie] = $this->signIn($this->makeUser(Role::EMPLOYEE));
+        $seenWhileRunning = null;
+        $cancelled = null;
+        $secondStatus = null;
+        $this->mock(StreamTransport::class, function ($mock) use (&$seenWhileRunning, &$cancelled, &$secondStatus, $cookie) {
+            $mock->shouldReceive('read')->once()->andReturnUsing(function ($url, $headers, $payload, $timeout, $receive, $stop) use (&$seenWhileRunning, &$cancelled, &$secondStatus, $cookie) {
+                $this->travel(110)->seconds();
+                // Renewal uses elapsed real time, which Laravel's travel helper does not advance.
+                sleep(11);
+                $cancelled = $stop();
+                $seenWhileRunning = Carbon::parse(DB::table('chat_requests')->value('expires_at'));
+                $this->travel(20)->seconds();
+                $secondStatus = $this->device($cookie)->postJson('/api/chat', ['message' => 'A second request'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->status();
+                $receive($this->sse());
+
+                return false;
+            });
+        });
+
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertOk()->streamedContent();
+
+        $this->assertNotNull($seenWhileRunning, 'the stream ran');
+        $this->assertFalse($cancelled);
+        $this->assertSame(409, $secondStatus);
+        $this->assertTrue($seenWhileRunning->between(now()->addSeconds(90), now()->addSeconds(110)), 'the reservation was renewed for another lease');
+    }
+
+    public function test_an_expired_stream_cannot_resume_after_another_request_has_started(): void
+    {
+        [, $cookie] = $this->signIn($this->makeUser(Role::EMPLOYEE));
+        $firstId = (string) Str::uuid();
+        $secondId = (string) Str::uuid();
+        $cancelled = null;
+        $expired = null;
+        $this->mock(StreamTransport::class, function ($mock) use ($cookie, $firstId, $secondId, &$cancelled, &$expired) {
+            $mock->shouldReceive('read')->once()->andReturnUsing(function ($url, $headers, $payload, $timeout, $receive, $stop) use ($cookie, $firstId, $secondId, &$cancelled, &$expired) {
+                $this->travel(181)->seconds();
+                $this->device($cookie)->postJson('/api/chat', ['message' => 'A new request'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => $secondId])->assertOk();
+                $cancelled = $stop();
+                $expired = Carbon::parse(DB::table('chat_requests')->where('id', $firstId)->value('expires_at'))->isPast();
+
+                return true;
+            });
+        });
+
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'The original request'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => $firstId])->assertOk()->streamedContent();
+        $this->assertTrue($cancelled, 'the expired stream must stop after losing its lease');
+        $this->assertTrue($expired, 'an expired lease must not be renewed');
+        $this->assertSame('running', DB::table('chat_requests')->where('id', $secondId)->value('status'));
+    }
+
+    public function test_a_reservation_that_is_not_renewed_frees_the_person_after_the_lease(): void
+    {
+        [$user] = [$this->makeUser(Role::EMPLOYEE)];
+        [, $cookie] = $this->signIn($user);
+        DB::table('chat_requests')->insert(['id' => (string) Str::uuid(), 'user_id' => $user->id, 'status' => 'running', 'cancel_requested' => false, 'expires_at' => now()->addSeconds(60), 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertStatus(409); // still within its lease
+
+        $this->travel(61)->seconds(); // the process behind it died and never renewed
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi again'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertOk();
     }
 
     public function test_provider_stream_decodes_split_events_and_real_usage(): void

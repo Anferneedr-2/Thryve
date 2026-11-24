@@ -8,6 +8,7 @@ use App\Ai\FileGenerationFailed;
 use App\Ai\GeneratedFiles;
 use App\Ai\ProviderException;
 use App\Ai\TokenLimitReached;
+use App\Http\Middleware\PrepareChatRequest;
 use App\Http\Responses\Api;
 use App\Models\Agent;
 use App\Models\Attachment;
@@ -260,6 +261,10 @@ class ChatController extends Controller
 
         return response()->stream(function () use ($request, $c, $kind, $id, $sessionId, $userId) {
             $old = ignore_user_abort(true);
+            // A long answer can stream for minutes. PHP's own script time limit (often 30 to 300 seconds on shared hosting) must
+            // not cut it: no limit, or the configured cap plus a minute. Some hosts forbid this call, which is harmless.
+            $cap = (int) config('services.hermes.stream_max_seconds');
+            @set_time_limit($cap > 0 ? $cap + 60 : 0);
             $status = 'failed';
             $accessLost = false;
             $event = function (string $event, array $data) use (&$accessLost) {
@@ -275,11 +280,22 @@ class ChatController extends Controller
             $checked = 0.;
             $cancelled = false;
             $pulse = microtime(true);
-            $stop = function () use ($id, $sessionId, $userId, $c, &$checked, &$cancelled, &$accessLost, &$pulse) {
+            $leased = 0.;
+            $stop = function () use ($id, $sessionId, $userId, $c, &$checked, &$cancelled, &$accessLost, &$pulse, &$leased) {
                 if (! app()->runningUnitTests() && microtime(true) - $checked < 0.5) {
                     return $cancelled;
                 }$checked = microtime(true);
-                $row = DB::table('chat_requests')->where('id', $id)->first();
+                $row = DB::transaction(function () use ($id, $userId, &$leased) {
+                    DB::table('users')->where('id', $userId)->lockForUpdate()->first();
+                    $row = DB::table('chat_requests')->where('id', $id)->first();
+                    if ($row && $row->status === 'running' && ! $row->cancel_requested && now()->lt($row->expires_at) && microtime(true) - $leased >= 10) {
+                        $row->expires_at = now()->addSeconds(PrepareChatRequest::LEASE_SECONDS);
+                        DB::table('chat_requests')->where('id', $id)->update(['expires_at' => $row->expires_at]);
+                        $leased = microtime(true);
+                    }
+
+                    return $row;
+                });
                 $u = User::find($userId);
                 $agent = $c->agent_id ? Agent::active()->find($c->agent_id) : null;
                 $accessLost = (bool) (! $u?->is_active || $u->session_id !== $sessionId || ($c->agent_id && (! $agent || ! Agent::canUse($u, $agent))));
@@ -292,7 +308,7 @@ class ChatController extends Controller
                     $pulse = microtime(true);
                 }
 
-                return $cancelled = (bool) (connection_aborted() || ! $row || $row->cancel_requested || $accessLost);
+                return $cancelled = (bool) (connection_aborted() || ! $row || $row->status !== 'running' || now()->gte($row->expires_at) || $row->cancel_requested || $accessLost);
             };
             try {
                 $event('started', ['stream_id' => $id, 'conversation' => $this->summary($c)]);

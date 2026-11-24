@@ -35,13 +35,17 @@ return [
         ],
     ],
 
-
     // Set by the installer. Reachability only until the Hermes contract is verified (plan D02).
     'hermes' => [
         'url' => env('HERMES_URL'),
         'key' => env('HERMES_API_KEY'),
         'model' => env('HERMES_MODEL', 'thryve-bot'), // the profile name Hermes serves, sent as "model" in each request
         'timeout' => (int) env('HERMES_TIMEOUT', 60), // seconds; Hermes retries a rate-limited provider for 10 minutes, so we never wait that long
+        // A streamed answer arrives piece by piece for as long as Hermes works on it, so it is NOT held to the short timeout above (that
+        // cut every answer that took over a minute, however steadily it was streaming). By default there is no time limit at all:
+        // Thryve waits until Hermes finishes. A dead connection is still noticed (TCP keep-alive). Set a number of seconds only if
+        // you want a hard cap on one answer.
+        'stream_max_seconds' => (int) env('HERMES_STREAM_MAX_SECONDS', 0), // 0 = no limit
     ],
 
 ];
