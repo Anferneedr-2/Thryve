@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Ai\AgentService;
 use App\Ai\Allowance;
 use App\Analysis\AnalysisContract;
 use App\Analysis\ConversationAnalyzer;
@@ -67,14 +68,21 @@ class ConversationAnalysisTest extends TestCase
         return Message::create($attrs + ['conversation_id' => $c->id, 'role' => $role, 'content' => $content, 'status' => 'ok']);
     }
 
+    /** What the report agent answers with right now: 200 = correctly, anything else = that HTTP error. A test can change it between steps. */
+    private int $agentStatus = 200;
+
     /** Make the report agent answer every request correctly (or the way $reply says), and remember what it was sent. */
     private function agentAnswers(?\Closure $reply = null, int $status = 200): void
     {
-        Http::fake(function (Request $request) use ($reply, $status) {
+        $this->agentStatus = $status;
+        Http::fake(function (Request $request) use ($reply) {
+            if ($request->method() === 'GET') { // the free connection test lists the profiles on the server
+                return $this->agentStatus === 200 ? Http::response(['data' => [['id' => 'report-ai']]]) : Http::response('', $this->agentStatus);
+            }
             $body = $request->data();
             $this->sent[] = $body;
-            if ($status !== 200) {
-                return Http::response('', $status);
+            if ($this->agentStatus !== 200) {
+                return Http::response('', $this->agentStatus);
             }
             $payload = json_decode($body['messages'][0]['content'], true);
             $content = $reply ? $reply($payload) : json_encode([
@@ -410,6 +418,97 @@ class ConversationAnalysisTest extends TestCase
         $this->assertNull(Settings::get('system_daily_token_budget'));
 
         $this->assertSame(1, $this->analyze()['valid']);
+    }
+
+    // ---- a broken agent that is fixed later --------------------------------------------------------
+
+    public function test_a_request_the_agent_refuses_is_retried_after_a_wait_instead_of_never(): void
+    {
+        $this->agentAnswers(status: 404); // a wrong profile name is answered like this
+        $c = $this->analysisChat();
+
+        $r = $this->analyze();
+
+        $this->assertSame('bad_request', $r['stopped']);
+        $a = ConversationAnalysis::sole();
+        $this->assertSame([$c->id, 'failed', 'bad_request', 1], [$a->conversation_id, $a->status, $a->error, $a->attempts]);
+        $this->assertNull($a->clarity);
+        $this->assertTrue($a->next_retry_at->between(now()->addMinutes(59), now()->addMinutes(61)), 'a retry time about an hour away is set');
+
+        $this->analyze(); // too early: not asked again
+        $this->assertCount(1, $this->sent);
+
+        $this->agentStatus = 200; // the agent was fixed
+        $this->travel(61)->minutes();
+        $this->assertSame(1, $this->analyze()['valid']);
+        $this->assertSame(['valid', 2], [$a->fresh()->status, $a->fresh()->attempts]);
+    }
+
+    public function test_a_passed_connection_test_makes_failed_analyses_due_at_once(): void
+    {
+        $this->agentAnswers(status: 404);
+        $this->analysisChat();
+        $this->analyze();
+        $a = ConversationAnalysis::sole();
+        $this->assertTrue($a->next_retry_at->isFuture());
+
+        $this->agentStatus = 200; // fixed, then an admin presses Test connection
+        $check = app(AgentService::class)->test($this->report, $this->super);
+        $this->assertTrue($check->ok);
+
+        $this->assertTrue($a->fresh()->next_retry_at->lte(now()), 'no waiting for the timer');
+        $this->assertSame(1, $this->analyze()['valid']);
+    }
+
+    public function test_a_failed_connection_test_does_not_wake_anything(): void
+    {
+        $this->agentAnswers(status: 404);
+        $this->analysisChat();
+        $this->analyze();
+        $when = ConversationAnalysis::sole()->next_retry_at;
+
+        $this->assertFalse(app(AgentService::class)->test($this->report, $this->super)->ok); // the agent still answers 404
+
+        $this->assertEquals($when, ConversationAnalysis::sole()->next_retry_at);
+    }
+
+    public function test_a_failed_row_with_attempts_left_but_no_retry_time_is_retried(): void
+    {
+        $this->agentAnswers();
+        $c = $this->analysisChat();
+        ConversationAnalysis::create($this->failedRow($c, attempts: 1, retryAt: null)); // what the old rule wrote for a refused request
+
+        $this->assertSame(1, $this->analyze()['valid']);
+        $this->assertSame(2, ConversationAnalysis::sole()->attempts);
+    }
+
+    public function test_waking_failed_analyses_leaves_out_other_agents_and_rows_with_no_attempts_left(): void
+    {
+        $other = Agent::create(['name' => 'Other', 'slug' => 'other', 'type' => 'report', 'base_url' => 'https://o.example.com', 'profile' => 'o']);
+        $mine = ConversationAnalysis::create($this->failedRow($this->analysisChat(), attempts: 1, retryAt: now()->addHour()));
+        $spent = ConversationAnalysis::create($this->failedRow($this->analysisChat(), attempts: ConversationAnalyzer::MAX_ATTEMPTS, retryAt: null));
+        $others = ConversationAnalysis::create($this->failedRow($this->analysisChat(), attempts: 1, retryAt: now()->addHour(), agentId: $other->id));
+
+        $this->assertSame(1, ConversationAnalysis::retryFailedNow($this->report->id));
+
+        $this->assertTrue($mine->fresh()->next_retry_at->lte(now()));
+        $this->assertNull($spent->fresh()->next_retry_at);
+        $this->assertTrue($others->fresh()->next_retry_at->isFuture());
+    }
+
+    /** A chat that has been quiet for over an hour, so it is ready to be analyzed. */
+    private function analysisChat(): Conversation
+    {
+        return $this->conversation();
+    }
+
+    private function failedRow(Conversation $c, int $attempts, $retryAt, ?int $agentId = null): array
+    {
+        $messages = Message::where('conversation_id', $c->id)->orderBy('id')->get(['id', 'role', 'content'])->map(fn ($m) => ['id' => $m->id, 'role' => $m->role, 'content' => $m->content])->all();
+
+        return ['conversation_id' => $c->id, 'user_id' => $c->user_id, 'agent_id' => $agentId ?? $this->report->id, 'rubric_version' => AnalysisContract::RUBRIC_VERSION,
+            'version_hash' => AnalysisContract::versionHash($messages), 'message_count' => count($messages), 'employee_message_count' => 1,
+            'status' => ConversationAnalysis::FAILED, 'error' => 'bad_request', 'attempts' => $attempts, 'next_retry_at' => $retryAt];
     }
 
     // ---- the command and the schedule ------------------------------------------------------------

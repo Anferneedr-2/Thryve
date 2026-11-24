@@ -44,7 +44,8 @@ class AttachmentController extends Controller
         if ($file->getSize() > $maxMb * 1024 * 1024) {
             return Api::error('file_too_large', "This file is larger than {$maxMb} MB.", 422);
         }
-        if (Attachment::where('user_id', $request->user()->id)->whereNull('message_id')->count() >= $maxCount) {
+        Attachment::prunePending($request->user()->id); // expired leftovers must not count against this person
+        if (Attachment::pending()->where('user_id', $request->user()->id)->count() >= $maxCount) {
             return Api::error('too_many_files', "You can attach up to {$maxCount} files to a message. Remove one first.", 422);
         }
         $kind = FileReader::kindFor($file->getClientOriginalName());

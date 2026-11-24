@@ -12,6 +12,7 @@ use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\SimulatesDevices;
 use Tests\TestCase;
@@ -162,6 +163,118 @@ class AttachmentTest extends TestCase
         $this->upload($cookie, $this->text('2.txt', 'two'))->assertCreated();
         $this->upload($cookie, $this->text('3.txt', 'three'))->assertStatus(422)->assertJsonPath('error.code', 'too_many_files');
         $this->device($cookie)->getJson('/api/attachments/limits')->assertJsonPath('data.max_count', 2)->assertJsonPath('data.max_mb', 1);
+    }
+
+    /** An upload that was never sent (message_id null) or one that was (pass a message id), created some minutes ago. */
+    private function leftover(int $userId, string $name, int $minutesAgo, ?int $messageId = null): Attachment
+    {
+        $key = 'attachments/leftover-'.$name.'.bin';
+        Storage::disk('private')->put($key, 'x');
+
+        return Attachment::create(['user_id' => $userId, 'message_id' => $messageId, 'original_name' => $name, 'kind' => 'txt', 'size' => 1, 'storage_key' => $key,
+            'sha256' => str_repeat('a', 64), 'extracted_text' => 'x', 'truncated' => false, 'created_at' => now()->subMinutes($minutesAgo)]);
+    }
+
+    public function test_unsent_uploads_that_waited_too_long_no_longer_block_new_attachments(): void
+    {
+        [$user, $cookie] = $this->me();
+        $stale = collect(range(1, 6))->map(fn ($i) => $this->leftover($user->id, "stale{$i}.txt", 120));
+
+        $this->upload($cookie, $this->text('new.txt', 'fresh'))->assertCreated();
+
+        $this->assertSame(0, Attachment::whereIn('id', $stale->pluck('id'))->count());
+        $stale->each(fn ($a) => Storage::disk('private')->assertMissing($a->storage_key));
+        $this->assertSame(1, Attachment::pending()->where('user_id', $user->id)->count());
+    }
+
+    public function test_recent_unsent_uploads_still_count_toward_the_limit(): void
+    {
+        [$user, $cookie] = $this->me();
+        $recent = collect(range(1, 6))->map(fn ($i) => $this->leftover($user->id, "recent{$i}.txt", 10));
+
+        $this->upload($cookie, $this->text('seventh.txt', 'no room'))->assertStatus(422)->assertJsonPath('error.code', 'too_many_files');
+
+        $this->assertSame(6, Attachment::whereIn('id', $recent->pluck('id'))->count());
+    }
+
+    public function test_a_file_that_was_sent_is_never_removed_however_old(): void
+    {
+        [$user] = $this->me();
+        $conversation = Conversation::create(['user_id' => $user->id, 'title' => 'Chat', 'last_message_at' => now()]);
+        $message = Message::create(['conversation_id' => $conversation->id, 'role' => 'user', 'content' => 'see file', 'status' => 'ok']);
+        $sent = $this->leftover($user->id, 'sent.txt', 60 * 24 * 5, $message->id);
+
+        $this->assertSame(0, Attachment::prunePending());
+
+        $this->assertSame(1, Attachment::whereKey($sent->id)->count());
+        Storage::disk('private')->assertExists($sent->storage_key);
+    }
+
+    public function test_one_persons_upload_only_cleans_up_their_own_leftovers(): void
+    {
+        [$me, $cookie] = $this->me();
+        $other = $this->makeUser(Role::EMPLOYEE);
+        $mine = $this->leftover($me->id, 'mine.txt', 120);
+        $theirs = $this->leftover($other->id, 'theirs.txt', 120);
+
+        $this->upload($cookie, $this->text('new.txt', 'fresh'))->assertCreated();
+
+        $this->assertSame(0, Attachment::whereKey($mine->id)->count());
+        $this->assertSame(1, Attachment::whereKey($theirs->id)->count()); // left for the scheduled clean-up
+    }
+
+    public function test_the_prune_command_removes_expired_unsent_uploads_for_everyone_and_keeps_the_rest(): void
+    {
+        [$me] = $this->me();
+        $other = $this->makeUser(Role::EMPLOYEE);
+        $staleA = $this->leftover($me->id, 'a.txt', 90);
+        $staleB = $this->leftover($other->id, 'b.txt', 600);
+        $fresh = $this->leftover($me->id, 'fresh.txt', 5);
+        $conversation = Conversation::create(['user_id' => $me->id, 'title' => 'Chat', 'last_message_at' => now()]);
+        $message = Message::create(['conversation_id' => $conversation->id, 'role' => 'user', 'content' => 'x', 'status' => 'ok']);
+        $sent = $this->leftover($me->id, 'sent.txt', 600, $message->id);
+
+        $this->artisan('thryve:prune-uploads')->expectsOutputToContain('Removed 2 expired unsent upload(s).')->assertSuccessful();
+
+        $this->assertSame(0, Attachment::whereIn('id', [$staleA->id, $staleB->id])->count());
+        Storage::disk('private')->assertMissing($staleA->storage_key);
+        Storage::disk('private')->assertMissing($staleB->storage_key);
+        $this->assertSame(2, Attachment::whereIn('id', [$fresh->id, $sent->id])->count());
+        Storage::disk('private')->assertExists($fresh->storage_key);
+        Storage::disk('private')->assertExists($sent->storage_key);
+    }
+
+    public function test_how_long_an_unsent_upload_may_wait_is_configurable(): void
+    {
+        [$user] = $this->me();
+        config(['thryve.pending_upload_minutes' => 5]);
+        $old = $this->leftover($user->id, 'old.txt', 10);
+        $young = $this->leftover($user->id, 'young.txt', 3);
+
+        $this->assertSame(1, Attachment::prunePending());
+
+        $this->assertSame([0, 1], [Attachment::whereKey($old->id)->count(), Attachment::whereKey($young->id)->count()]);
+    }
+
+    public function test_sending_with_an_upload_that_has_expired_asks_the_person_to_attach_it_again(): void
+    {
+        Http::fake();
+        [, $cookie] = $this->me();
+        $first = $this->upload($cookie, $this->text('first.txt', 'one'))->assertCreated()->json('data.id');
+        $this->travel(61)->minutes();
+        $this->upload($cookie, $this->text('second.txt', 'two'))->assertCreated(); // this upload clears the expired first one
+
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'see file', 'attachment_ids' => [$first]])->assertStatus(422)->assertJsonPath('error.code', 'file_not_found');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_the_clean_up_of_unsent_uploads_is_scheduled_every_hour(): void
+    {
+        $event = collect(Schedule::events())->first(fn ($e) => str_contains($e->command, 'thryve:prune-uploads'));
+
+        $this->assertNotNull($event);
+        $this->assertSame('0 * * * *', $event->expression);
     }
 
     public function test_long_files_are_shortened_and_flagged(): void

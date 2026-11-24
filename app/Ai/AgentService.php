@@ -4,6 +4,7 @@ namespace App\Ai;
 
 use App\Models\Agent;
 use App\Models\AgentCheck;
+use App\Models\ConversationAnalysis;
 use App\Models\User;
 use App\Support\Audit;
 use Illuminate\Support\Facades\DB;
@@ -140,6 +141,9 @@ class AgentService
         ]);
         if ($updateAgent && $agent->status !== 'revoked') {
             $agent->update(['status' => self::statusFor($r), 'last_checked_at' => now(), 'last_latency_ms' => $r['latency_ms'] ?? null]);
+            if ($r['ok'] && $agent->isReport()) {
+                ConversationAnalysis::retryFailedNow($agent->id); // the agent works again: failed analyses need not wait out their timer
+            }
         }
         $old = AgentCheck::where('agent_id', $agent->id)->orderByDesc('id')->skip(self::KEEP_CHECKS)->value('id');
         if ($old) {

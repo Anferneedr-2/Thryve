@@ -15,6 +15,9 @@ Schedule::command('thryve:heartbeat')->everyMinute()->skip(fn () => app(Maintena
 // Keep the single-session bookkeeping tidy.
 Schedule::command('thryve:prune-sessions')->hourly()->skip(fn () => app(Maintenance::class)->active());
 
+// Remove files that were uploaded to a chat but never sent, so they cannot pile up against the per-message file limit.
+Schedule::command('thryve:prune-uploads')->hourly()->skip(fn () => app(Maintenance::class)->active());
+
 // Close attendance sessions whose browser went silent.
 Schedule::command('thryve:attendance-reconcile')->everyMinute()->skip(fn () => app(Maintenance::class)->active());
 

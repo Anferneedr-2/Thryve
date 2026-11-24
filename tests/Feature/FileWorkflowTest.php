@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Ai\BoundedPdfParser;
+use App\Ai\FileGenerationFailed;
 use App\Ai\FileReader;
 use App\Ai\GeneratedFiles;
 use App\Models\Attachment;
@@ -12,7 +13,9 @@ use Dompdf\Dompdf;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\Concerns\SimulatesDevices;
 use Tests\TestCase;
@@ -236,6 +239,123 @@ class FileWorkflowTest extends TestCase
         $this->assertTrue($doc->loadXML($zip->getFromName('ppt/presentation.xml')));
         $this->assertSame(2, $doc->getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'sldId')->length);
         $zip->close();
+    }
+
+    private function deck(array $slides): array
+    {
+        return ['format' => 'pptx', 'name' => 'Deck', 'title' => 'Deck', 'slides' => $slides];
+    }
+
+    private function openDeck(string $bytes): \ZipArchive
+    {
+        $path = $this->tmpDir.'/deck-'.bin2hex(random_bytes(3)).'.pptx';
+        file_put_contents($path, $bytes);
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($path));
+
+        return $zip;
+    }
+
+    public function test_a_deck_with_only_slide_titles_is_made_and_is_a_valid_package(): void
+    {
+        foreach ([[['title' => 'Goals', 'bullets' => []], ['title' => 'Progress', 'bullets' => []], ['title' => 'Next steps', 'bullets' => []]],
+            [['title' => 'Goals'], ['title' => 'Progress'], ['title' => 'Next steps']]] as $slides) {
+            $zip = $this->openDeck((new GeneratedFiles)->render($this->deck($slides))['bytes']);
+            $doc = new \DOMDocument;
+            $this->assertTrue($doc->loadXML($zip->getFromName('ppt/presentation.xml')));
+            $this->assertSame(3, $doc->getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'sldId')->length);
+            foreach ([1 => 'Goals', 2 => 'Progress', 3 => 'Next steps'] as $n => $title) {
+                $xml = $zip->getFromName("ppt/slides/slide{$n}.xml");
+                $this->assertTrue($doc->loadXML($xml), "slide {$n} is well-formed XML");
+                $this->assertStringContainsString($title, $doc->textContent);
+                $this->assertStringNotContainsString('THRYVE_', $xml, 'no template placeholder is left behind');
+                foreach ($doc->getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'txBody') as $body) {
+                    $this->assertGreaterThanOrEqual(1, $body->getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'p')->length, 'a text body keeps at least one paragraph');
+                }
+            }
+            $zip->close();
+        }
+    }
+
+    public function test_a_slide_with_more_than_five_bullets_continues_on_a_following_slide(): void
+    {
+        $zip = $this->openDeck((new GeneratedFiles)->render($this->deck([['title' => 'Goals', 'bullets' => ['1', '2', '3', '4', '5', '6', '7']], ['title' => 'Risks', 'bullets' => ['one']]]))['bytes']);
+        $doc = new \DOMDocument;
+        $doc->loadXML($zip->getFromName('ppt/presentation.xml'));
+        $this->assertSame(3, $doc->getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'sldId')->length);
+        $doc->loadXML($zip->getFromName('ppt/slides/slide2.xml'));
+        $this->assertStringContainsString('Goals (cont.)', $doc->textContent);
+        $this->assertStringContainsString('6', $doc->textContent);
+        $this->assertStringContainsString('7', $doc->textContent);
+        $doc->loadXML($zip->getFromName('ppt/slides/slide3.xml'));
+        $this->assertStringContainsString('Risks', $doc->textContent);
+        $zip->close();
+    }
+
+    public function test_long_slide_text_is_cut_with_an_ellipsis_instead_of_refusing_the_deck(): void
+    {
+        $zip = $this->openDeck((new GeneratedFiles)->render($this->deck([['title' => str_repeat('T', 100), 'bullets' => [str_repeat('b', 200), '   ', 'short']]]))['bytes']);
+        $doc = new \DOMDocument;
+        $doc->loadXML($zip->getFromName('ppt/slides/slide1.xml'));
+        $this->assertStringContainsString(str_repeat('T', 79).'…', $doc->textContent);
+        $this->assertStringNotContainsString(str_repeat('T', 81), $doc->textContent);
+        $this->assertStringContainsString(str_repeat('b', 119).'…', $doc->textContent);
+        $this->assertStringContainsString('short', $doc->textContent);
+        $zip->close();
+    }
+
+    public function test_a_deck_never_has_more_than_twenty_slides(): void
+    {
+        $slides = array_map(fn ($i) => ['title' => "Slide {$i}", 'bullets' => ['x']], range(1, 25));
+        $zip = $this->openDeck((new GeneratedFiles)->render($this->deck($slides))['bytes']);
+        $doc = new \DOMDocument;
+        $doc->loadXML($zip->getFromName('ppt/presentation.xml'));
+        $this->assertSame(20, $doc->getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'sldId')->length);
+        $zip->close();
+    }
+
+    public function test_slide_content_that_is_not_plain_text_is_still_refused(): void
+    {
+        $generator = new GeneratedFiles;
+        foreach ([
+            [['title' => 'Goals', 'bullets' => [['nested' => 'array']]]],
+            [['title' => 'Goals', 'bullets' => 'not a list']],
+            [['bullets' => ['no title']]],
+            [['title' => '   ', 'bullets' => ['blank title']]],
+            ['not even a slide'],
+        ] as $slides) {
+            try {
+                $generator->render($this->deck($slides));
+                $this->fail('Expected this slide content to be refused: '.json_encode($slides));
+            } catch (ValidationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        $this->expectException(FileGenerationFailed::class);
+        $generator->render($this->deck([]));
+    }
+
+    public function test_a_refused_file_logs_why_but_never_the_content(): void
+    {
+        Log::spy();
+        $payload = ['version' => 1, 'message' => 'Here it is.', 'files' => [$this->deck([['bullets' => ['SECRET-CONTENT-XYZ']]])]];
+        try {
+            (new GeneratedFiles)->decode(json_encode($payload), 'pptx');
+            $this->fail('Expected the file to be refused');
+        } catch (FileGenerationFailed) {
+        }
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn ($message) => str_contains($message, 'slides.0.title') && ! str_contains($message, 'SECRET-CONTENT-XYZ'));
+    }
+
+    public function test_asking_for_a_deck_with_only_titles_through_chat_gives_a_powerpoint_download(): void
+    {
+        $cookie = $this->cookie();
+        $this->response($this->block($this->deck([['title' => 'Goals', 'bullets' => []], ['title' => 'Progress', 'bullets' => []], ['title' => 'Next steps', 'bullets' => []]]), 'Here is your deck.'));
+
+        $r = $this->device($cookie)->postJson('/api/chat', ['message' => 'Create a PowerPoint with 3 slides titled Goals, Progress and Next steps.'])->assertOk();
+
+        $r->assertJsonPath('data.reply.attachments.0.kind', 'pptx')->assertJsonPath('data.reply.content', 'Here is your deck.');
+        $this->device($cookie)->get('/api/attachments/'.Attachment::sole()->id.'/download')->assertOk();
     }
 
     public function test_pdf_aggregate_decompression_is_bounded_before_materializing_all_objects(): void

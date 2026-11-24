@@ -7,9 +7,11 @@ use App\Models\Message;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -77,8 +79,8 @@ final class GeneratedFiles
                 throw new FileGenerationFailed;
             }
             $file = $this->render($spec);
-        } catch (\Throwable) {
-            throw new FileGenerationFailed;
+        } catch (\Throwable $e) {
+            throw $this->refused($e);
         }
         $note = trim((string) preg_replace('/(\R\s*){3,}/', "\n\n", rtrim(substr($content, 0, $m[0][1]))."\n\n".ltrim(substr($content, $m[0][1] + strlen($m[0][0])))));
 
@@ -106,13 +108,58 @@ final class GeneratedFiles
             }
 
             return ['message' => $data['message'], 'files' => $rendered];
-        } catch (\Throwable) {
-            throw new FileGenerationFailed;
+        } catch (\Throwable $e) {
+            throw $this->refused($e);
         }
+    }
+
+    /**
+     * Repair what a model gets slightly wrong so a good deck is not thrown away: missing or empty bullets (a title-only
+     * slide), long text (cut with an ellipsis) and more than five bullets (continued on the next slide). Anything that
+     * is not plain text is left alone, so the validation in render() still refuses it.
+     */
+    private function normalizeSlides(array $slides): array
+    {
+        $out = [];
+        foreach (array_values($slides) as $slide) {
+            $bullets = is_array($slide) ? ($slide['bullets'] ?? []) : null;
+            if (! is_array($slide) || ! is_string($slide['title'] ?? null) || trim($slide['title']) === ''
+                || ! is_array($bullets) || array_filter($bullets, fn ($b) => ! is_string($b))) {
+                $out[] = $slide;
+
+                continue;
+            }
+            $title = $this->clip(trim($slide['title']), 80);
+            $bullets = array_values(array_filter(array_map(fn ($b) => $this->clip(trim($b), 120), $bullets), fn ($b) => $b !== ''));
+            foreach (array_chunk($bullets, 5) ?: [[]] as $i => $chunk) {
+                $out[] = ['title' => $i === 0 ? $title : $this->clip($title, 70).' (cont.)', 'bullets' => $chunk];
+            }
+        }
+
+        return array_slice($out, 0, 20);
+    }
+
+    private function clip(string $text, int $max): string
+    {
+        return mb_strlen($text) <= $max ? $text : rtrim(mb_substr($text, 0, $max - 1)).'…';
+    }
+
+    /** Record why a file was refused (field names and rules only, never the content) and return the generic error people see. */
+    private function refused(\Throwable $e): FileGenerationFailed
+    {
+        $why = $e instanceof ValidationException
+            ? implode(' | ', array_slice(array_map(fn ($messages) => $messages[0], $e->errors()), 0, 5))
+            : $e::class.($e instanceof \JsonException ? ': '.$e->getMessage() : '');
+        Log::warning('Generated file refused: '.$why);
+
+        return $e instanceof FileGenerationFailed ? $e : new FileGenerationFailed;
     }
 
     public function render(array $spec): array
     {
+        if (($spec['format'] ?? null) === 'pptx' && is_array($spec['slides'] ?? null)) {
+            $spec['slides'] = $this->normalizeSlides($spec['slides']);
+        }
         Validator::make($spec, [
             'format' => ['required', 'in:'.implode(',', self::FORMATS)],
             'name' => ['required', 'string', 'max:100'],
@@ -123,7 +170,7 @@ final class GeneratedFiles
             'rows.*' => ['array', 'max:30'],
             'slides' => ['sometimes', 'array', 'max:20'],
             'slides.*.title' => ['required', 'string', 'max:80'],
-            'slides.*.bullets' => ['required', 'array', 'min:1', 'max:5'],
+            'slides.*.bullets' => ['present', 'array', 'max:5'],
             'slides.*.bullets.*' => ['string', 'max:120'],
         ])->validate();
         $format = $spec['format'];
@@ -272,6 +319,11 @@ final class GeneratedFiles
                 if ($text->textContent === 'THRYVE_TITLE') {
                     $text->textContent = $slide['title'];
                 } elseif ($text->textContent === 'THRYVE_BODY') {
+                    if ($slide['bullets'] === []) {
+                        // A title-only slide keeps its (now empty) body paragraph: a text body must hold at least one.
+                        $text->textContent = '';
+                        break;
+                    }
                     $paragraph = $text->parentNode->parentNode;
                     $parent = $paragraph->parentNode;
                     foreach ($slide['bullets'] as $bullet) {

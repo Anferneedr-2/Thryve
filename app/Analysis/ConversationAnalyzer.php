@@ -127,7 +127,9 @@ class ConversationAnalyzer
             return false; // already has a stored result for this version
         }
 
-        return $row->attempts < self::MAX_ATTEMPTS && $row->next_retry_at !== null && $row->next_retry_at->lte(now());
+        // Attempts left, and the waiting time is over. A failed row with attempts left but no time set (written by an
+        // older rule that never retried) is due at once.
+        return $row->attempts < self::MAX_ATTEMPTS && ($row->next_retry_at === null || $row->next_retry_at->lte(now()));
     }
 
     /** The current messages the agent will see: not replaced, not failed, not empty, oldest first. */
@@ -226,7 +228,7 @@ class ConversationAnalyzer
         ConversationAnalysis::updateOrCreate($key, $values);
     }
 
-    /** Record a failure. After the last allowed attempt there is no retry time, so it is never tried again. */
+    /** Record a failure and when to try again. After the last allowed attempt there is no retry time, so it is not tried again. */
     private function fail(array $key, array $base, int $attempts, string $error, int $retryMinutes, string $ref): void
     {
         $retry = $retryMinutes > 0 && $attempts < self::MAX_ATTEMPTS ? now()->addMinutes($retryMinutes) : null;
@@ -235,11 +237,16 @@ class ConversationAnalyzer
         ]);
     }
 
-    /** How long to wait before trying a failed conversation again (0 = never). Never an immediate repeat. */
+    /**
+     * How long to wait before trying a failed conversation again. Never an immediate repeat, and never "never": even a
+     * request the agent refused (a wrong profile name is reported this way) may work once an admin has fixed the agent.
+     * The attempt limit keeps it from repeating forever, and a passed connection test makes failed rows due at once
+     * (see ConversationAnalysis::retryFailedNow).
+     */
     private function retryMinutes(string $category): int
     {
         return match ($category) {
-            'bad_request' => 0,
+            'bad_request' => 60, // a configuration problem: give an admin time to fix it
             'timeout' => 60, // the agent may still be working on it: do not repeat soon
             'bad_response' => 15,
             default => 30, // rate limited, unavailable, key rejected

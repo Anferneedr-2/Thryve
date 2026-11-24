@@ -7,6 +7,10 @@ return [
     // Disk for user files. Never served directly; access only through authorized API routes.
     'private_disk' => 'private',
 
+    // A file that was uploaded but never sent with a message is removed after this long. Until then it counts toward
+    // the per-message file limit, so a failed send or a reloaded page cannot lock someone out of attaching files for good.
+    'pending_upload_minutes' => (int) env('THRYVE_PENDING_UPLOAD_MINUTES', 60),
+
     // Installer: the marker file proves installation finished; env_path is where the wizard writes settings.
     // Both can be overridden (tests, disposable demo runs) without touching the real files.
     'install_marker' => env('THRYVE_INSTALL_MARKER', storage_path('app/installed.json')),
