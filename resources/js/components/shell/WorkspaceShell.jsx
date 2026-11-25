@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { send } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useRouter } from '../../lib/router';
 import { LogoImg, useBranding } from '../../lib/branding';
@@ -7,6 +8,8 @@ import { ROLE_LABEL } from '../../lib/roles';
 import { AttendanceHeartbeat } from '../../lib/heartbeat';
 import Icon from '../Icon';
 import NotificationBell from '../NotificationBell';
+import { Button } from '../ui/Button';
+import { Banner } from '../ui/Feedback';
 import { Menu } from '../ui/Overlay';
 import { isActive, railItems } from './nav';
 
@@ -78,6 +81,21 @@ function TabBar({ items, path, go }) {
     );
 }
 
+// Shown on every screen while a Super Admin is viewing as someone. One click returns to the Super Admin's own account.
+function ViewingAsBanner({ name }) {
+    const [busy, setBusy] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const back = async () => {
+        setBusy(true); setFailed(false);
+        try { await send('POST', '/auth/impersonation/stop'); window.location.assign('/people'); } catch (e) { setFailed(true); setBusy(false); }
+    };
+    return (
+        <Banner action={<Button size="sm" variant="primary" disabled={busy} onClick={back}>{busy ? 'Returning...' : 'Return to my account'}</Button>}>
+            Viewing as <strong>{name}</strong>. Your actions are saved to their account and logged under your name.{failed && ' Could not return. Try again.'}
+        </Banner>
+    );
+}
+
 export default function WorkspaceShell({ children }) {
     const { user } = useAuth();
     const { path, navigate } = useRouter();
@@ -91,13 +109,16 @@ export default function WorkspaceShell({ children }) {
 
     return (
         <AttendanceHeartbeat>
-            <div className="ws">
-                <a className="ws-skip" href="#ws-main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
-                <Rail items={items} path={path} go={navigate} />
-                <main id="ws-main" ref={main} tabIndex={-1} className={`ws-main ${flush ? 'flush' : ''}`} aria-label={ROLE_LABEL[user.role]}>
-                    {children}
-                </main>
-                <TabBar items={items} path={path} go={navigate} />
+            <div className={user.viewing_as_by ? 'ws-frame' : undefined}>
+                {user.viewing_as_by && <ViewingAsBanner name={user.name} />}
+                <div className="ws">
+                    <a className="ws-skip" href="#ws-main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
+                    <Rail items={items} path={path} go={navigate} />
+                    <main id="ws-main" ref={main} tabIndex={-1} className={`ws-main ${flush ? 'flush' : ''}`} aria-label={ROLE_LABEL[user.role]}>
+                        {children}
+                    </main>
+                    <TabBar items={items} path={path} go={navigate} />
+                </div>
             </div>
         </AttendanceHeartbeat>
     );

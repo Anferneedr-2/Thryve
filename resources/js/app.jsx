@@ -22,6 +22,7 @@ import Chat from './pages/Chat';
 import Departments from './pages/Departments';
 import SettingsArea, { SETTINGS_ITEMS } from './pages/SettingsArea';
 import InstallWizard from './pages/InstallWizard';
+import ChangePassword from './pages/ChangePassword';
 import Login from './pages/Login';
 import People from './pages/People';
 import { Prices, Usage } from './pages/AiAgents';
@@ -111,6 +112,7 @@ function Gate() {
 
     if (status === 'loading') return <main className="mx-auto max-w-[440px] px-6 py-20"><Skeleton lines={4} /></main>;
     if (status === 'guest') return <Login />;
+    if (user.must_change_password) return <ChangePassword />;
     if (!user.policy_acknowledged) return <PolicyAck />;
     return <WorkspaceShell><Screen /></WorkspaceShell>;
 }

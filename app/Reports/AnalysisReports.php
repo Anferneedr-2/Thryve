@@ -25,6 +25,10 @@ final class AnalysisReports
     /** The employee's own page needs fewer, because it is only a hint to that person. */
     public const MIN_SAMPLE_OWN = 5;
 
+    private const TIP_POOL = 60; // newest results looked at when choosing which tips to show first
+
+    private const TIP_LIMIT = 4; // tips shown at the top of the person's own page
+
     private const DROP = 0.3; // the average fell by at least this much since the previous period
 
     private const TOPIC_SHARE = 30; // one topic is at least this percent of the conversations
@@ -99,9 +103,57 @@ final class AnalysisReports
                 'scores' => collect(AnalysisContract::DIMENSIONS)->mapWithKeys(fn ($d) => [$d => $r->{$d} === null ? null : (int) $r->{$d}])->all(),
                 'average' => (float) $r->average, 'tip' => $r->tip,
             ])->all();
+        $data['priority_tips'] = $this->priorityTips($f, $data['dimensions']);
         $data['period'] = ['from' => $f->from, 'to' => $f->to];
 
         return $data;
+    }
+
+    /**
+     * The tips to read first on the person's own page. The focus is their lowest-scoring area overall. Tips come from
+     * conversations whose own lowest score is in that area, lowest score first and newest first among equals. When too
+     * few conversations match, the rest are filled from their other conversations. Repeated tip text is shown once.
+     *
+     * @param  list<array{key: string, label: string, average: float|null, samples: int}>  $dimensions
+     * @return list<array{conversation_id: int, title: string, tip: string, area: string, area_label: string, score: int, at: string, in_focus: bool, first: bool}>
+     */
+    private function priorityTips(ReportFilters $f, array $dimensions): array
+    {
+        $scored = array_values(array_filter($dimensions, fn ($d) => $d['average'] !== null));
+        if (! $scored) {
+            return [];
+        }
+        usort($scored, fn ($a, $b) => $a['average'] <=> $b['average']);
+        $focus = $scored[0]['key'];
+
+        $rows = $this->latest($f)->orderByDesc('c.last_message_at')->limit(self::TIP_POOL)
+            ->get(['c.id as conversation_id', 'c.title', 'c.last_message_at', 'a.clarity', 'a.context', 'a.specifics', 'a.refinement', 'a.verification', 'a.tip']);
+
+        $seen = [];
+        $tips = [];
+        foreach ($rows as $r) {
+            $scores = collect(AnalysisContract::DIMENSIONS)->mapWithKeys(fn ($d) => [$d => $r->{$d}])->filter(fn ($v) => $v !== null)->map(fn ($v) => (int) $v);
+            $text = trim((string) $r->tip);
+            if ($scores->isEmpty() || $text === '' || isset($seen[mb_strtolower($text)])) {
+                continue;
+            }
+            $seen[mb_strtolower($text)] = true;
+            $lowest = $scores->min();
+            $areas = $scores->filter(fn ($v) => $v === $lowest)->keys();
+            $inFocus = $areas->contains($focus);
+            $area = $inFocus ? $focus : $areas->first();
+            $tips[] = [
+                'conversation_id' => (int) $r->conversation_id, 'title' => $r->title, 'tip' => $text, 'area' => $area, 'area_label' => self::LABELS[$area], 'score' => $lowest,
+                'at' => CarbonImmutable::parse($r->last_message_at, 'UTC')->toIso8601String(), 'in_focus' => $inFocus, 'first' => false,
+            ];
+        }
+        usort($tips, fn ($a, $b) => [$b['in_focus'], $a['score']] <=> [$a['in_focus'], $b['score']]);
+        $tips = array_slice($tips, 0, self::TIP_LIMIT);
+        if ($tips) {
+            $tips[0]['first'] = true;
+        }
+
+        return $tips;
     }
 
     /** Is analysis switched on and able to run? The screens use this to say "not enabled" instead of showing empty charts. */

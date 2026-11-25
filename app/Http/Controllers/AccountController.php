@@ -24,6 +24,7 @@ class AccountController extends Controller
         }
 
         $user->password = $d['password']; // hashed by the model cast; the session stays signed in
+        $user->must_change_password = false;
         $user->save();
         Audit::log('account.password_changed', $user, $user);
 

@@ -386,6 +386,42 @@ class AnalysisApiTest extends TestCase
         $this->assertSame(5, $this->as($this->ann)->getJson('/api/analysis/mine')->json('data.min_sample'));
     }
 
+    public function test_the_first_tips_come_from_the_weakest_area_lowest_score_first(): void
+    {
+        $this->analysis($this->ann, [5, 5, 4, 5, 2], 3, ['tip' => 'Check the numbers.']);
+        $this->analysis($this->ann, [5, 5, 5, 4, 1], 2, ['tip' => 'Ask for sources.']);
+        $this->analysis($this->ann, [2, 4, 4, 4, 4], 1, ['tip' => 'State the goal first.']);
+
+        $tips = $this->as($this->ann)->getJson('/api/analysis/mine')->assertOk()->json('data.priority_tips');
+
+        $this->assertSame(['Ask for sources.', 'Check the numbers.', 'State the goal first.'], array_column($tips, 'tip'));
+        $this->assertSame([true, false, false], array_column($tips, 'first'));
+        $this->assertSame([true, true, false], array_column($tips, 'in_focus'));
+        $this->assertSame(['Verification', 'Verification', 'Clarity'], array_column($tips, 'area_label'));
+    }
+
+    public function test_repeated_tips_show_once_and_at_most_four_are_offered(): void
+    {
+        foreach (range(1, 6) as $i) {
+            $this->analysis($this->ann, [5, 5, 5, 5, 1 + ($i % 2)], $i, ['tip' => $i <= 2 ? 'Ask for sources.' : "Tip number {$i}."]);
+        }
+
+        $tips = $this->as($this->ann)->getJson('/api/analysis/mine')->assertOk()->json('data.priority_tips');
+
+        $this->assertCount(4, $tips);
+        $this->assertSame(1, count(array_keys(array_column($tips, 'tip'), 'Ask for sources.')));
+    }
+
+    public function test_tips_belong_to_the_signed_in_person_and_are_empty_without_results(): void
+    {
+        $this->analysis($this->bob, [1, 1, 1, 1, 1], over: ['tip' => 'Bob only tip']);
+
+        $r = $this->as($this->ann)->getJson('/api/analysis/mine')->assertOk();
+
+        $this->assertSame([], $r->json('data.priority_tips'));
+        $this->assertStringNotContainsString('Bob only tip', $r->getContent());
+    }
+
     public function test_the_state_says_when_analysis_is_ready(): void
     {
         Agent::create(['name' => 'Report AI', 'slug' => 'report-ai', 'type' => 'report', 'base_url' => 'https://r.example.com', 'profile' => 'report-ai', 'outbound_key' => 'key-report-1234567890']);

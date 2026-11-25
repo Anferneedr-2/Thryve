@@ -33,6 +33,12 @@ class UserPolicy
         };
     }
 
+    /** Only a Super Admin may view as someone; which people qualify is decided by Impersonation::blockedReason(). */
+    public function impersonate(User $actor, User $target): bool
+    {
+        return $actor->hasRole(Role::SUPER_ADMIN);
+    }
+
     public function manage(User $actor, User $target): bool
     {
         return match (true) {

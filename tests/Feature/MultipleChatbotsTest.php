@@ -9,6 +9,7 @@ use App\Models\Message;
 use App\Models\Role;
 use App\Models\UsageRecord;
 use App\Models\User;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -28,7 +29,7 @@ class MultipleChatbotsTest extends TestCase
     {
         parent::setUp();
         $this->useDatabaseSessions();
-        $this->seed(\Database\Seeders\RoleSeeder::class);
+        $this->seed(RoleSeeder::class);
         config(['services.hermes.url' => null, 'services.hermes.key' => null]);
         $this->general = $this->agent('General', 'general', 'https://general.example.com', true);
         $this->coach = $this->agent('Coach', 'coach', 'https://coach.example.com', false, 'Helps you improve how you work');
@@ -325,6 +326,72 @@ class MultipleChatbotsTest extends TestCase
         }
         $this->device($admin)->putJson("/api/users/{$emp->id}/agents", [])->assertStatus(422);
         $this->assertSame(0, DB::table('agent_user')->count());
+    }
+
+    // ---- access given while creating the account ------------------------------------------------------
+
+    /** @return array<string, mixed> */
+    private function newPerson(string $role, array $extra = []): array
+    {
+        return $extra + ['username' => 'new.person', 'name' => 'New Person', 'password' => 'a-long-start-password', 'role' => $role];
+    }
+
+    public function test_an_employee_is_created_with_their_chatbot_access_in_one_step(): void
+    {
+        $admin = $this->cookieFor(Role::ADMIN);
+
+        $id = $this->device($admin)->postJson('/api/users', $this->newPerson(Role::EMPLOYEE, ['agent_ids' => [$this->coach->id]]))->assertCreated()->json('data.id');
+
+        $this->assertSame([$this->coach->id], DB::table('agent_user')->where('user_id', $id)->pluck('agent_id')->all());
+        $entry = AuditEntry::where('action', 'agent.access_changed')->where('target_id', $id)->firstOrFail();
+        $this->assertSame([$this->coach->id], $entry->metadata['added']);
+        $this->assertSame(1, AuditEntry::where('action', 'account.created')->where('target_id', $id)->count());
+    }
+
+    public function test_creating_without_chatbots_gives_the_default_only_and_no_access_entry(): void
+    {
+        $id = $this->device($this->cookieFor(Role::ADMIN))->postJson('/api/users', $this->newPerson(Role::EMPLOYEE))->assertCreated()->json('data.id');
+
+        $this->assertSame(0, DB::table('agent_user')->where('user_id', $id)->count());
+        $this->assertSame(0, AuditEntry::where('action', 'agent.access_changed')->count());
+    }
+
+    public function test_a_bad_chatbot_choice_stops_the_whole_account_from_being_created(): void
+    {
+        $admin = $this->cookieFor(Role::ADMIN);
+        $gone = $this->agent('Gone', 'gone', 'https://gone.example.com', false);
+        $gone->update(['removed_at' => now()]);
+        $before = User::count();
+
+        foreach ([[$this->general->id], [99999], [$gone->id], [$this->coach->id, 99999]] as $ids) {
+            $this->device($admin)->postJson('/api/users', $this->newPerson(Role::EMPLOYEE, ['agent_ids' => $ids]))->assertStatus(422);
+        }
+
+        $this->assertSame($before, User::count());
+        $this->assertSame(0, DB::table('agent_user')->count());
+    }
+
+    public function test_chatbots_cannot_be_chosen_for_an_admin_or_super_admin_account(): void
+    {
+        $superAdmin = $this->cookieFor(Role::SUPER_ADMIN);
+        $before = User::count();
+
+        $this->device($superAdmin)->postJson('/api/users', $this->newPerson(Role::ADMIN, ['agent_ids' => [$this->coach->id]]))
+            ->assertStatus(422)->assertJsonPath('error.code', 'not_applicable');
+
+        $this->assertSame($before, User::count());
+        $this->device($superAdmin)->postJson('/api/users', $this->newPerson(Role::ADMIN, ['agent_ids' => []]))->assertCreated();
+    }
+
+    public function test_the_create_form_lists_the_chatbots_to_admins_but_not_to_employees(): void
+    {
+        $r = $this->device($this->cookieFor(Role::ADMIN))->getJson('/api/user-agent-options')->assertOk();
+
+        $this->assertSame(['General', 'Coach'], array_column($r->json('data.agents'), 'name'));
+        $this->assertSame([true, false], array_column($r->json('data.agents'), 'is_default'));
+        $this->assertStringNotContainsString('example.com', $r->getContent());
+        $this->device($this->cookieFor(Role::EMPLOYEE))->getJson('/api/user-agent-options')->assertStatus(403);
+        $this->device(null)->getJson('/api/user-agent-options')->assertStatus(401);
     }
 
     public function test_setting_the_same_access_twice_changes_nothing(): void

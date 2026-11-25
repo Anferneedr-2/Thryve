@@ -67,6 +67,7 @@ return [
         'system.update' => ['audience' => 'super_admins', 'email' => true],
         'system.health' => ['audience' => 'super_admins', 'email' => false],
         'system.test' => ['audience' => 'subject', 'email' => false],
+        'account.invitation_failed' => ['audience' => 'admins', 'email' => false],
     ],
 
     // Attendance (decision D06 is still open: these are documented defaults, not approved rules).

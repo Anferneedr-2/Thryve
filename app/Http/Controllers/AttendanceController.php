@@ -6,6 +6,7 @@ use App\Attendance\Tracker;
 use App\Http\Responses\Api;
 use App\Models\AttendanceDay;
 use App\Support\BusinessDay;
+use App\Support\Impersonation;
 use App\Updates\Maintenance;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +25,8 @@ class AttendanceController extends Controller
         // While an update or restore runs, the one browser allowed through (the updating Super Admin's) must not write:
         // a row added between the backup and its check would make the backup look incomplete. Time in maintenance is not
         // counted for that person.
-        if (app(Maintenance::class)->active()) {
+        // Viewing as an employee must not clock the employee in, and the Super Admin's time is not the employee's work.
+        if (Impersonation::active($request) || app(Maintenance::class)->active()) {
             return Api::ok([
                 'state' => 'active', 'paused' => true,
                 'interval_seconds' => (int) config('thryve.attendance.heartbeat_seconds'),
@@ -47,7 +49,7 @@ class AttendanceController extends Controller
     /** Sent when the page is being closed. Best effort; the scheduled sweep covers a missed message. */
     public function close(Request $request): JsonResponse
     {
-        if (app(Maintenance::class)->active()) {
+        if (Impersonation::active($request) || app(Maintenance::class)->active()) {
             return Api::ok(['closed' => false, 'paused' => true]);
         }
         $this->tracker->end($request->user(), CarbonImmutable::now(), 'closed');

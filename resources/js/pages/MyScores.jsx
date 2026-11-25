@@ -32,12 +32,25 @@ export default function MyScores() {
         <div className="rp-intro"><div>
             <span className="rp-label">MY PROMPT SCORES</span>
             <h2>How your prompts are working</h2>
-            <p>Scores from 1 to 5 for how you wrote your prompts in your AI chats over the last 90 days. They describe your prompting only, not your work or performance. Administrators see summaries in company reports; your tips and conversation list are only on this page.</p>
+            <p>Scores from 1 to 5 for how you wrote your prompts in your AI chats over the last 90 days. They describe your prompting only, not your work or performance. Administrators see summaries in company reports.</p>
         </div></div>
         {error && <Alert tone="danger" title="Could not load your scores"><p>{error}</p><Button size="sm" onClick={() => setRetry((n) => n + 1)}>Try again</Button></Alert>}
         {!d && !error && <div className="sl-card" role="status"><Skeleton lines={8} /></div>}
         {d && <>
             <StateNotice state={d.state} conversations={d.totals.conversations} own />
+            {d.priority_tips.length > 0 && (
+                <Panel title="Tips to try first" subtitle="Start with the first one. Each tip comes from one of your own conversations, and they are ordered by the area where you score lowest.">
+                    <div className="rp-recs">
+                        {d.priority_tips.map((t) => (
+                            <Alert key={t.conversation_id} tone="info" title={`${t.first ? 'Do this first' : 'Next'} · ${t.area_label}`}>
+                                <p>{t.tip}</p>
+                                <button type="button" className="rp-text-button" onClick={() => navigate(`/chat/${t.conversation_id}`)}>From: {t.title}</button>
+                                <small> · {dateText(t.at)}</small>
+                            </Alert>
+                        ))}
+                    </div>
+                </Panel>
+            )}
             <div className="rp-kpis">
                 <Stat label="Overall score" value={d.totals.average == null ? '—' : `${number(d.totals.average)} / 5`} note="Average across your scored conversations" />
                 <Stat label="Conversations scored" value={number(d.totals.conversations)} note={`Of ${number(d.coverage.eligible)} in the last 90 days`} />
@@ -50,7 +63,7 @@ export default function MyScores() {
                 </Panel>
                 <Panel title="Score by area" subtitle="Your average out of 5"><DimensionBars rows={d.dimensions} /></Panel>
             </div>
-            <Panel title="Tips for you" subtitle="Based on your own scored conversations">
+            <Panel title="Notes on your scores" subtitle="Based on your own scored conversations">
                 <Recommendations items={d.recommendations} minimum={d.min_sample} conversations={d.totals.conversations} />
             </Panel>
             <Panel title="Recent conversations" subtitle="Your latest scored conversations, with a tip for each">

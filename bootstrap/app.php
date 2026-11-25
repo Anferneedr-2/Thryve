@@ -1,8 +1,18 @@
 <?php
 
+use App\Http\Middleware\CheckMaintenance;
+use App\Http\Middleware\EnsureCurrentSession;
+use App\Http\Middleware\EnsureInstalled;
+use App\Http\Middleware\EnsureNotInstalled;
+use App\Http\Middleware\EnsurePasswordChanged;
+use App\Http\Middleware\EnsurePolicyAcknowledged;
+use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\HoldWhileDatabaseBehind;
+use App\Http\Middleware\RejectWhileImpersonating;
 use App\Http\Responses\Api;
-use Illuminate\Auth\AuthenticationException;
+use App\Updates\Maintenance;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -24,17 +34,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // API callers never get a redirect; without this, a request lacking an Accept header crashed on a missing login route.
         $middleware->redirectGuestsTo(fn (Request $request) => $request->is('api/*') ? null : '/');
         // Maintenance runs first, before sessions or the database are touched; its bypass cookie must stay readable as plain text.
-        $middleware->prepend(\App\Http\Middleware\CheckMaintenance::class);
-        $middleware->encryptCookies(except: [\App\Updates\Maintenance::COOKIE]);
+        $middleware->prepend(CheckMaintenance::class);
+        $middleware->encryptCookies(except: [Maintenance::COOKIE]);
         // Behind a tunnel/proxy (e.g. Cloudflare) the request arrives over http; trust X-Forwarded-Proto so URLs and assets stay https.
         $middleware->trustProxies(at: '*');
         $middleware->alias([
-            'installed' => \App\Http\Middleware\EnsureInstalled::class,
-            'not-installed' => \App\Http\Middleware\EnsureNotInstalled::class,
-            'current-session' => \App\Http\Middleware\EnsureCurrentSession::class,
-            'role' => \App\Http\Middleware\EnsureRole::class,
-            'policy' => \App\Http\Middleware\EnsurePolicyAcknowledged::class,
-            'db-current' => \App\Http\Middleware\HoldWhileDatabaseBehind::class,
+            'installed' => EnsureInstalled::class,
+            'not-installed' => EnsureNotInstalled::class,
+            'current-session' => EnsureCurrentSession::class,
+            'role' => EnsureRole::class,
+            'password-changed' => EnsurePasswordChanged::class,
+            'policy' => EnsurePolicyAcknowledged::class,
+            'not-viewing-as' => RejectWhileImpersonating::class,
+            'db-current' => HoldWhileDatabaseBehind::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
