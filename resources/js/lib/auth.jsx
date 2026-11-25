@@ -37,10 +37,16 @@ export function AuthProvider({ children }) {
         setState({ status: 'guest', user: null, notice: null });
     }, []);
 
+    // First sign-in with an administrator-given password: the server clears the flag once the new password is saved.
+    const changeFirstPassword = useCallback(async (form) => {
+        await send('POST', '/account/password', form);
+        setState((s) => ({ ...s, user: { ...s.user, must_change_password: false } }));
+    }, []);
+
     const acknowledgePolicy = useCallback(async () => {
         await send('POST', '/policy/acknowledge', { accept: true });
         setState((s) => ({ ...s, user: { ...s.user, policy_acknowledged: true } }));
     }, []);
 
-    return <AuthCtx.Provider value={{ ...state, login, logout, acknowledgePolicy }}>{children}</AuthCtx.Provider>;
+    return <AuthCtx.Provider value={{ ...state, login, logout, changeFirstPassword, acknowledgePolicy }}>{children}</AuthCtx.Provider>;
 }

@@ -16,6 +16,7 @@ use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
 use App\Support\AgentAvatar;
+use App\Support\Impersonation;
 use App\Support\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -258,8 +259,9 @@ class ChatController extends Controller
         $id = $request->attributes->get('chat_request_id');
         $sessionId = $request->session()->getId();
         $userId = $request->user()->id;
+        $impersonatorId = Impersonation::impersonatorId($request); // when set, this browser holds the Super Admin's session, not the employee's
 
-        return response()->stream(function () use ($request, $c, $kind, $id, $sessionId, $userId) {
+        return response()->stream(function () use ($request, $c, $kind, $id, $sessionId, $userId, $impersonatorId) {
             $old = ignore_user_abort(true);
             // A long answer can stream for minutes. PHP's own script time limit (often 30 to 300 seconds on shared hosting) must
             // not cut it: no limit, or the configured cap plus a minute. Some hosts forbid this call, which is harmless.
@@ -281,7 +283,7 @@ class ChatController extends Controller
             $cancelled = false;
             $pulse = microtime(true);
             $leased = 0.;
-            $stop = function () use ($id, $sessionId, $userId, $c, &$checked, &$cancelled, &$accessLost, &$pulse, &$leased) {
+            $stop = function () use ($id, $sessionId, $userId, $impersonatorId, $c, &$checked, &$cancelled, &$accessLost, &$pulse, &$leased) {
                 if (! app()->runningUnitTests() && microtime(true) - $checked < 0.5) {
                     return $cancelled;
                 }$checked = microtime(true);
@@ -298,7 +300,8 @@ class ChatController extends Controller
                 });
                 $u = User::find($userId);
                 $agent = $c->agent_id ? Agent::active()->find($c->agent_id) : null;
-                $accessLost = (bool) (! $u?->is_active || $u->session_id !== $sessionId || ($c->agent_id && (! $agent || ! Agent::canUse($u, $agent))));
+                $owner = $impersonatorId ? User::find($impersonatorId) : $u; // whose single session this browser holds
+                $accessLost = (bool) (! $u?->is_active || ! $owner?->is_active || $owner->session_id !== $sessionId || ($c->agent_id && (! $agent || ! Agent::canUse($u, $agent))));
                 if (! app()->runningUnitTests() && ! $accessLost && microtime(true) - $pulse >= 1) {
                     echo ": keep-alive\n\n";
                     if (ob_get_level() > 0) {

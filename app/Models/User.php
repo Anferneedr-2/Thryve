@@ -24,6 +24,7 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'must_change_password' => 'boolean',
             'deactivated_at' => 'datetime',
             'last_login_at' => 'datetime',
         ];

@@ -1,5 +1,8 @@
 /* Workspace shell (P05A): icon rail, main area, phone tab bar. Measurements from design-proposals/chat-workspace-v2.html. */
 
+.ws-frame{display:flex;flex-direction:column;height:100dvh;background:var(--stage-b)} /* only while a Super Admin is viewing as someone: banner on top, the workspace below */
+.ws-frame>.sl-banner{margin:8px 12px;flex:none}
+.ws-frame>.ws{flex:1;min-height:0;height:auto}
 .ws{display:grid;grid-template-columns:84px minmax(0,1fr);height:100dvh;overflow:hidden;background:var(--stage-b)}
 
 /* ---- rail ---- */

@@ -7,6 +7,8 @@ use App\Http\Resources\UserResource;
 use App\Http\Responses\Api;
 use App\Models\User;
 use App\Support\Audit;
+use App\Support\Impersonation;
+use App\Updates\UpdateManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -64,15 +66,19 @@ class AuthController extends Controller
     private function present(User $user): array
     {
         return UserResource::make($user)->resolve() + [
+            'must_change_password' => (bool) $user->must_change_password,
             'policy_acknowledged' => $user->hasAcknowledgedPolicy(),
+            // Set only while a Super Admin is viewing as this person: the page shows a banner with a way back.
+            'viewing_as_by' => ($real = Impersonation::impersonator()) ? ['id' => $real->id, 'name' => $real->name] : null,
             // New code was deployed and the database is behind it: the Super Admin is sent to the update screen.
-            'database_update_needed' => $user->hasRole('super_admin') && app(\App\Updates\UpdateManager::class)->databaseBehind(),
+            'database_update_needed' => $user->hasRole('super_admin') && app(UpdateManager::class)->databaseBehind(),
         ];
     }
 
     public function logout(Request $request): JsonResponse
     {
-        $user = $request->user();
+        // Signing out while viewing as someone ends the Super Admin's own session. The employee's session is never touched.
+        $user = Impersonation::impersonator($request) ?? $request->user();
         $user->forceFill(['session_id' => null])->save();
         Audit::log('auth.logout', $user, $user);
         app(Tracker::class)->safely(fn (Tracker $t) => $t->end($user, now(), 'logout'));

@@ -13,6 +13,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BrandingController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\ImpersonationController;
 use App\Http\Controllers\InstallController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PolicyController;
@@ -52,13 +53,16 @@ Route::middleware(['web', 'installed'])->group(function () {
     Route::middleware(['auth', 'current-session', 'db-current'])->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
+        Route::post('/auth/impersonation/stop', [ImpersonationController::class, 'stop']); // back to the Super Admin's own account
 
-        Route::post('/account/password', [AccountController::class, 'changePassword']);
+        // Closed while a Super Admin is viewing as this person: these are the employee's own.
+        Route::post('/account/password', [AccountController::class, 'changePassword'])->middleware('not-viewing-as');
         Route::get('/policy', [PolicyController::class, 'show']);
-        Route::post('/policy/acknowledge', [PolicyController::class, 'acknowledge']);
+        Route::post('/policy/acknowledge', [PolicyController::class, 'acknowledge'])->middleware('not-viewing-as');
 
         // Everything below needs the current usage policy to be acknowledged first.
-        Route::middleware('policy')->group(function () {
+        // The password comes first, then the policy: someone still on an admin-given password sees only the change screen.
+        Route::middleware(['password-changed', 'policy'])->group(function () {
 
             // Own notifications (the bell). Scoped to the signed-in user in the controller.
             Route::get('/notifications', [NotificationController::class, 'index']);
@@ -118,11 +122,13 @@ Route::middleware(['web', 'installed'])->group(function () {
                 Route::patch('/analysis/topics/{id}', [AnalysisTopicController::class, 'update'])->whereNumber('id');
                 Route::get('/users', [UserController::class, 'index']);
                 Route::post('/users', [UserController::class, 'store']);
+                Route::get('/user-agent-options', [AgentAccessController::class, 'options']);
                 Route::get('/users/{user}', [UserController::class, 'show']);
                 Route::patch('/users/{user}', [UserController::class, 'update']);
                 Route::post('/users/{user}/deactivate', [UserController::class, 'deactivate']);
                 Route::post('/users/{user}/reactivate', [UserController::class, 'reactivate']);
                 Route::post('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
+                Route::post('/users/{user}/impersonate', [ImpersonationController::class, 'start']); // Super Admin only (UserPolicy)
                 Route::get('/users/{user}/agents', [AgentAccessController::class, 'show']);
                 Route::put('/users/{user}/agents', [AgentAccessController::class, 'update']);
 

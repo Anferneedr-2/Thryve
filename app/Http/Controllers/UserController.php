@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Attendance\Tracker;
 use App\Http\Resources\UserResource;
 use App\Http\Responses\Api;
+use App\Jobs\SendInvitationEmail;
+use App\Mail\MailConfigurator;
+use App\Models\Agent;
 use App\Models\Role;
 use App\Models\User;
 use App\Support\Audit;
@@ -13,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class UserController extends Controller
 {
@@ -69,22 +73,39 @@ class UserController extends Controller
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'exists:departments,id'],
             'daily_token_limit' => ['nullable', 'integer', 'min:0'],
+            'agent_ids' => ['nullable', 'array'],
+            'agent_ids.*' => ['integer', 'distinct'],
         ]);
         Gate::authorize('assignRole', [User::class, $d['role']]);
 
-        $user = DB::transaction(function () use ($d) {
+        $agentIds = array_values(array_unique($d['agent_ids'] ?? []));
+        if ($agentIds && $d['role'] !== Role::EMPLOYEE) {
+            return Api::error('not_applicable', 'Admins and Super Admins can use every enabled chatbot.', 422);
+        }
+        if (array_diff($agentIds, Agent::assignableIds())) {
+            return Api::error('validation_failed', 'One of the chatbots cannot be assigned. The default chatbot is open to everyone, and removed ones cannot be given.', 422, ['agent_ids' => ['Choose from the listed chatbots only.']]);
+        }
+
+        $user = DB::transaction(function () use ($d, $agentIds, $request) {
             $user = new User(['username' => $d['username'], 'name' => $d['name'], 'email' => $d['email'] ?? null, 'password' => $d['password']]);
             $user->role_id = Role::where('slug', $d['role'])->firstOrFail()->id;
             $user->is_active = true;
+            $user->must_change_password = true; // the admin chose this password; the person picks their own at first sign-in
             $user->daily_token_limit = $d['daily_token_limit'] ?? null;
             $user->save();
             $user->departments()->sync($d['department_ids'] ?? []);
+            foreach ($agentIds as $agentId) {
+                DB::table('agent_user')->insert(['agent_id' => $agentId, 'user_id' => $user->id, 'granted_by' => $request->user()->id, 'created_at' => now()]);
+            }
 
             return $user;
         });
         Audit::log('account.created', $request->user(), $user, ['role' => $d['role'], 'departments' => $d['department_ids'] ?? []]);
+        if ($agentIds) {
+            Audit::log('agent.access_changed', $request->user(), $user, ['added' => $agentIds, 'removed' => []]);
+        }
 
-        return Api::ok(UserResource::make($user->load('role', 'departments'))->resolve(), status: 201);
+        return Api::ok(UserResource::make($user->load('role', 'departments'))->resolve() + ['invitation' => $this->sendInvitation($request, $user, $d['password'])], status: 201);
     }
 
     public function update(Request $request, User $user): JsonResponse
@@ -171,10 +192,35 @@ class UserController extends Controller
 
         $user->password = $d['password'];
         $user->session_id = null;
+        $user->must_change_password = ! $user->is($request->user()); // someone setting their own password is not made to change it again
         $user->save();
         Audit::log('account.password_reset', $request->user(), $user);
 
         return Api::ok(['reset' => true]);
+    }
+
+    /**
+     * Queue the invitation email for a new account. Returns what the admin should be told: 'queued', 'no_email'
+     * (no address was entered), 'email_off' (email is not set up) or 'failed' (it could not be queued). The account
+     * exists in every case.
+     */
+    private function sendInvitation(Request $request, User $user, string $startingPassword): string
+    {
+        if (! $user->email) {
+            return 'no_email';
+        }
+        if (! MailConfigurator::enabled()) {
+            return 'email_off';
+        }
+        try {
+            SendInvitationEmail::dispatch($user->id, $request->user()->id, $startingPassword);
+        } catch (Throwable $e) {
+            report($e);
+
+            return 'failed';
+        }
+
+        return 'queued';
     }
 
     private function isLastActiveSuperAdmin(User $user): bool

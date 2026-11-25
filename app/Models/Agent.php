@@ -43,6 +43,17 @@ class Agent extends Model
         return $q->where('type', self::TYPE_CHAT);
     }
 
+    /**
+     * Chatbots that can be given to an individual employee: every active chat agent except the default,
+     * which is open to everyone.
+     *
+     * @return array<int, int>
+     */
+    public static function assignableIds(): array
+    {
+        return self::active()->chat()->where('is_default', false)->pluck('id')->all();
+    }
+
     public function scopeReport($q)
     {
         return $q->where('type', self::TYPE_REPORT);

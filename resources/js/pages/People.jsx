@@ -39,6 +39,12 @@ function PersonForm({ person, departments, onClose, onSaved }) {
     const [errors, setErrors] = useState({});
     const [formError, setFormError] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [agents, setAgents] = useState([]);
+    const [agentIds, setAgentIds] = useState([]);
+    useEffect(() => {
+        if (!editing) get('/user-agent-options').then((d) => setAgents(d.agents)).catch(() => {});
+    }, [editing]);
+    const toggleAgent = (id) => setAgentIds((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
     const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
     const toggleDept = (id) => setForm((f) => ({ ...f, department_ids: f.department_ids.includes(id) ? f.department_ids.filter((x) => x !== id) : [...f.department_ids, id] }));
 
@@ -52,10 +58,11 @@ function PersonForm({ person, departments, onClose, onSaved }) {
             daily_token_limit: form.daily_token_limit === '' ? null : Number(form.daily_token_limit),
         };
         try {
+            let created = null;
             if (editing) await send('PATCH', `/users/${person.id}`, body);
-            else await send('POST', '/users', { ...body, username: form.username, password: form.password });
-            toast(editing ? 'Changes saved' : 'Person added');
-            onSaved();
+            else created = await send('POST', '/users', { ...body, username: form.username, password: form.password, agent_ids: form.role === 'employee' ? agentIds : [] });
+            toast(editing ? 'Changes saved' : created?.invitation === 'queued' ? 'Person added. An invitation email is on its way.' : 'Person added');
+            onSaved(created ? { invitation: created.invitation, name: created.name } : null);
         } catch (err) {
             if (Object.keys(err.details ?? {}).length) setErrors(fieldErrors(err));
             else setFormError(err.message);
@@ -71,7 +78,8 @@ function PersonForm({ person, departments, onClose, onSaved }) {
                 {formError && <Alert tone="danger" title="Could not save">{formError}</Alert>}
                 {!editing && <TextField label="Username" help="Letters, numbers, dots, dashes, underscores. Cannot be changed later." value={form.username} onChange={set('username')} error={errors.username} autoComplete="off" autoCapitalize="none" />}
                 <TextField label="Full name" value={form.name} onChange={set('name')} error={errors.name} />
-                <TextField label="Email (optional)" type="email" value={form.email ?? ''} onChange={set('email')} error={errors.email} />
+                <TextField label="Email (optional)" type="email" value={form.email ?? ''} onChange={set('email')} error={errors.email}
+                    help={editing ? undefined : 'If you add one, they get an email with their username and starting password.'} />
                 {!editing && <PasswordField label="Temporary password" value={form.password} onChange={set('password')} error={errors.password} />}
                 <SelectField label="Role" value={form.role} onChange={set('role')} error={errors.role} disabled={isSelf || assignableRoles(me).length === 1}>
                     {assignableRoles(me).concat(editing && !assignableRoles(me).includes(form.role) ? [form.role] : []).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
@@ -83,6 +91,18 @@ function PersonForm({ person, departments, onClose, onSaved }) {
                         <Checkbox key={d.id} label={d.name} checked={form.department_ids.includes(d.id)} onChange={() => toggleDept(d.id)} />
                     ))}
                 </fieldset>
+                {!editing && form.role === 'employee' && agents.length > 0 && (
+                    <fieldset className="grid gap-2" style={{ border: 0, padding: 0, margin: 0 }}>
+                        <legend className="sl-field" style={{ fontSize: 13, fontWeight: 600, color: 'var(--sl-heading)', marginBottom: 6 }}>Chatbot access</legend>
+                        {agents.filter((a) => a.is_default).map((a) => (
+                            <Checkbox key={a.id} label={a.name} hint={a.description ? `Everyone. ${a.description}` : 'Everyone'} checked disabled readOnly />
+                        ))}
+                        {agents.filter((a) => !a.is_default).map((a) => (
+                            <Checkbox key={a.id} label={a.is_enabled ? a.name : `${a.name} (disabled)`} hint={a.description} checked={agentIds.includes(a.id)} onChange={() => toggleAgent(a.id)} />
+                        ))}
+                        {errors.agent_ids && <div className="sl-error" role="alert">{errors.agent_ids}</div>}
+                    </fieldset>
+                )}
             </form>
         </Dialog>
     );
@@ -162,6 +182,7 @@ export default function People() {
     const [departments, setDepartments] = useState([]);
     const [dialog, setDialog] = useState(null); // {type, person?}
     const [notice, setNotice] = useState(null);
+    const [invite, setInvite] = useState(null); // what happened to the invitation email for the person just added
 
     // Debounce the search box so the list is not reloaded on every keystroke.
     useEffect(() => {
@@ -176,11 +197,23 @@ export default function People() {
     useEffect(load, [load]);
     useEffect(() => { get('/departments').then(setDepartments).catch(() => {}); }, []);
 
+    // The account always exists. When no invitation went out, say why and who must pass on the starting password.
+    const INVITE_NOTICE = {
+        no_email: (n) => `${n} has no email address, so no invitation email was sent. Give them their starting password yourself.`,
+        email_off: (n) => `Email is switched off or not set up in Settings, so no invitation email was sent. Give ${n} their starting password yourself.`,
+        failed: (n) => `The invitation email for ${n} could not be queued. Give them their starting password yourself.`,
+    };
     const act = async (fn, okMessage) => {
         setNotice(null);
+        setInvite(null);
         try { await fn(); toast(okMessage); load(); } catch (err) { setNotice(errorText(err)); }
     };
     const setFilter = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value, page: 1 }));
+    // Opens the app as that person in this browser. A full page load starts clean, as them, with the banner on.
+    const viewAs = async (person) => {
+        setNotice(null);
+        try { await send('POST', `/users/${person.id}/impersonate`); window.location.assign('/chat'); } catch (err) { setNotice(errorText(err)); }
+    };
 
     const rows = (result?.data ?? []).map((p) => {
         const items = [];
@@ -188,6 +221,9 @@ export default function People() {
             items.push({ label: 'Edit', icon: 'edit', onSelect: () => setDialog({ type: 'edit', person: p }) });
             items.push({ label: 'Chatbot access', icon: 'chat', onSelect: () => setDialog({ type: 'access', person: p }) });
             items.push({ label: 'Reset password', icon: 'sliders', onSelect: () => setDialog({ type: 'reset', person: p }) });
+            if (me.role === 'super_admin' && p.role === 'employee' && p.id !== me.id) {
+                items.push({ label: 'Log in as', icon: 'users', disabled: !!p.view_as_blocked, hint: p.view_as_blocked ?? undefined, onSelect: () => viewAs(p) });
+            }
             if (me.role === 'super_admin' && p.is_active && p.id !== me.id) items.push({ label: 'End session', icon: 'x', onSelect: () => setDialog({ type: 'terminate', person: p }) });
             if (p.id !== me.id) {
                 items.push('-');
@@ -229,6 +265,7 @@ export default function People() {
             </div>
 
             {notice && <Alert tone="danger" title="That did not work">{notice}</Alert>}
+            {invite && <Alert tone="warning" title="Person added, but no invitation email was sent">{invite}</Alert>}
             {error ? <ErrorState onRetry={load}>{error.message}</ErrorState> : !result ? <Skeleton lines={6} /> : rows.length === 0 ? (
                 <EmptyState icon="users" title={filtered ? 'No one matches those filters' : 'No people yet'}>{filtered ? 'Try clearing a filter.' : 'Add the first person to get started.'}</EmptyState>
             ) : (
@@ -248,7 +285,7 @@ export default function People() {
             )}
 
             {(dialog?.type === 'create' || dialog?.type === 'edit') && (
-                <PersonForm person={dialog.person} departments={departments} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); load(); }} />
+                <PersonForm person={dialog.person} departments={departments} onClose={() => setDialog(null)} onSaved={(created) => { setDialog(null); setInvite(created && INVITE_NOTICE[created.invitation] ? INVITE_NOTICE[created.invitation](created.name) : null); load(); }} />
             )}
             {dialog?.type === 'reset' && <ResetPasswordDialog person={dialog.person} onClose={() => setDialog(null)} />}
             {dialog?.type === 'access' && <ChatbotAccessDialog person={dialog.person} onClose={() => setDialog(null)} />}

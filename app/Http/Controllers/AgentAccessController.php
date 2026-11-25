@@ -26,6 +26,16 @@ class AgentAccessController extends Controller
         return Api::ok($this->present($user));
     }
 
+    /** The chatbots an admin can tick while adding a person, before that person exists. */
+    public function options(): JsonResponse
+    {
+        Gate::authorize('viewAny', User::class);
+
+        return Api::ok(['agents' => Agent::active()->chat()->orderByDesc('is_default')->orderBy('name')->get()->map(fn ($a) => [
+            'id' => $a->id, 'name' => $a->name, 'description' => $a->description, 'is_default' => $a->is_default, 'is_enabled' => $a->is_enabled,
+        ])->values()]);
+    }
+
     public function update(Request $request, User $user): JsonResponse
     {
         Gate::authorize('manage', $user);
@@ -33,9 +43,8 @@ class AgentAccessController extends Controller
             return Api::error('not_applicable', 'Admins and Super Admins can use every enabled chatbot.', 422);
         }
         $d = $request->validate(['agent_ids' => ['present', 'array'], 'agent_ids.*' => ['integer', 'distinct']]);
-        $assignable = Agent::active()->chat()->where('is_default', false)->pluck('id')->all();
         $ids = array_values(array_unique($d['agent_ids']));
-        if ($bad = array_diff($ids, $assignable)) {
+        if (array_diff($ids, Agent::assignableIds())) {
             return Api::error('validation_failed', 'One of the chatbots cannot be assigned. The default chatbot is open to everyone, and removed ones cannot be given.', 422, ['agent_ids' => ['Choose from the listed chatbots only.']]);
         }
 

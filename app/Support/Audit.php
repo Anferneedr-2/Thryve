@@ -16,6 +16,13 @@ final class Audit
 
     public static function log(string $action, ?User $actor = null, ?Model $target = null, array $metadata = [], ?string $ip = null): AuditEntry
     {
+        // While a Super Admin is viewing as an employee, the record names the Super Admin and says who they were acting as.
+        $real = $actor ? Impersonation::impersonator() : null;
+        if ($real && ! $actor->is($real)) {
+            $metadata['acting_as'] = ['id' => $actor->id, 'username' => $actor->username];
+            $actor = $real;
+        }
+
         return AuditEntry::create([
             'actor_id' => $actor?->id,
             'actor_username' => $actor?->username,

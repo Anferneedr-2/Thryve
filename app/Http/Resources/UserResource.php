@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Role;
+use App\Support\Impersonation;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -22,6 +24,11 @@ class UserResource extends JsonResource
             'daily_token_limit' => $this->daily_token_limit,
             'departments' => $this->departments->map(fn ($d) => ['id' => $d->id, 'name' => $d->name])->values(),
             'last_login_at' => $this->last_login_at?->toIso8601String(),
+            // Only a Super Admin looking at an employee sees this. Null means "Log in as" is allowed; text says why it is not.
+            'view_as_blocked' => $this->when(
+                $request->user()?->hasRole(Role::SUPER_ADMIN) && $this->hasRole(Role::EMPLOYEE),
+                fn () => Impersonation::blockedReason($request->user(), $this->resource),
+            ),
         ];
     }
 }
