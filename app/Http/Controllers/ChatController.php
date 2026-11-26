@@ -340,6 +340,10 @@ class ChatController extends Controller
 
     private function respond(Request $request, Conversation $c, string $requestKind = 'send', ?callable $emit = null, ?callable $stop = null): JsonResponse|StreamedResponse
     {
+        // A new chat only gets its conversation now: tie the reservation to it so the same chat cannot answer twice.
+        if ($id = $request->attributes->get('chat_request_id')) {
+            DB::table('chat_requests')->where('id', $id)->whereNull('conversation_id')->update(['conversation_id' => $c->id, 'expires_at' => DB::raw('expires_at')]); // naming expires_at stops MariaDB from resetting this lease to now
+        }
         if ($emit === null && str_contains($request->header('Accept', ''), 'text/event-stream')) {
             return $this->streamResponse($request, $c, $requestKind);
         }

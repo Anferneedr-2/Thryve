@@ -66,15 +66,18 @@ export default function Chat() {
     const [limits, setLimits] = useState({ max_count: 6, max_mb: 15, types: ['txt', 'md', 'csv', 'docx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg'] });
     const pickerRef = useRef(null);
     const abort = useRef(null);
-    const detachStream = useCallback(() => { const ctl = abort.current; if (!ctl) return; ctl.detached = true; setLiveText(''); setPendingText(null); setCanStop(false); if (ctl.streamId) send('POST', `/chat/streams/${ctl.streamId}/stop`).catch(() => {}); ctl.abort(); }, []);
+    // An answer keeps running when the person opens another chat: it moves to `bg` and finishes quietly (the server saves it).
+    const bg = useRef(new Set());
+    const mounted = useRef(true);
+    const backgroundStream = useCallback(() => { const ctl = abort.current; if (!ctl) return; bg.current.add(ctl); abort.current = null; setBusy(false); setLiveText(''); setPendingText(null); setCanStop(false); setStopping(false); }, []);
     const pathRef = useRef(path); pathRef.current = path;
     useEffect(() => {
         const ctl = abort.current;
         if (ctl && ctl.origin !== path) {
-            detachStream();
+            backgroundStream();
         }
     }, [path]);
-    useEffect(() => () => { const ctl = abort.current; if (ctl) ctl.detached = true; if (ctl?.streamId) send('POST', `/chat/streams/${ctl.streamId}/stop`).catch(() => {}); ctl?.abort(); }, []);
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
     const endRef = useRef(null);
     const box = useRef(null);
     const stick = useRef(true);
@@ -97,7 +100,12 @@ export default function Chat() {
         let cancelled = false;
         setLoadingConv(true); setError(null); setEditing(null);
         get(`/conversations/${routeId}`)
-            .then((c) => { if (cancelled) return; setCurrent(c); stick.current = true; if (c.agent) setPicked(c.agent.id); })
+            .then((c) => {
+                if (cancelled) return;
+                setCurrent(c); stick.current = true; if (c.agent) setPicked(c.agent.id);
+                const live = [...bg.current].find((x) => x.conversationId === c.id);
+                if (live && !abort.current) { bg.current.delete(live); abort.current = live; setBusy(true); setCanStop(!!live.streamId); setLiveText(live.text || ''); setPendingText(null); }
+            })
             .catch((e) => { if (!cancelled) { toast(errorText(e)); navigate('/chat', { replace: true }); } })
             .finally(() => { if (!cancelled) setLoadingConv(false); });
         return () => { cancelled = true; };
@@ -116,9 +124,9 @@ export default function Chat() {
 
     // ---- navigation helpers ----------------------------------------------------------------------------------------------
     const closeOverlays = () => { setLeftOv(false); setRightOv(false); };
-    const openChat = (id) => { if (pathRef.current !== `/chat/${id}`) detachStream(); setSensitive(null); closeOverlays(); navigate(`/chat/${id}`); };
+    const openChat = (id) => { if (pathRef.current !== `/chat/${id}`) backgroundStream(); setSensitive(null); closeOverlays(); navigate(`/chat/${id}`); };
     const startNew = (agentId) => {
-        detachStream(); setSensitive(null);
+        backgroundStream(); setSensitive(null);
         closeOverlays();
         if (agentId) setPicked(agentId);
         setCurrent(null); setError(null); setEditing(null); setDraft('');
@@ -168,21 +176,22 @@ export default function Chat() {
         touchCurrent();
         setBusy(true); setError(null); setLiveText(''); setStopping(false); setCanStop(false);
         const ctl = new AbortController(); abort.current = ctl;
-        ctl.origin = pathRef.current;
-        const active = () => !ctl.detached && pathRef.current === ctl.origin && abort.current === ctl;
+        ctl.origin = pathRef.current; ctl.text = '';
+        const active = () => abort.current === ctl && mounted.current;
         try {
             const r = await fn(ctl.signal, false, (event, data) => {
-                if (event === 'started') { ctl.streamId = data.stream_id; ctl.conversationId = data.conversation.id; if (!active()) { send('POST', `/chat/streams/${ctl.streamId}/stop`).catch(() => {}); return; } setCanStop(true); setCurrent(previous => ({ ...data.conversation, messages: previous?.id === data.conversation.id ? previous.messages : [] })); }
-                if (event === 'delta' && active()) setLiveText(text => text + data.text);
+                if (event === 'started') { ctl.streamId = data.stream_id; ctl.conversationId = data.conversation.id; if (active()) { setCanStop(true); setCurrent(previous => ({ ...data.conversation, messages: previous?.id === data.conversation.id ? previous.messages : [] })); } }
+                if (event === 'delta') { ctl.text += data.text; if (active()) setLiveText(text => text + data.text); }
             });
-            if (!active()) return false;
             const conv = r.data.conversation;
-            const saved = await get(`/conversations/${conv.id}`); if (!active()) return false; setCurrent(saved);
-            loadList(); loadUsage(); stick.current = true;
+            if (mounted.current) { loadList(); loadUsage(); }
+            if (!active()) return true;
+            const saved = await get(`/conversations/${conv.id}`); if (!active()) return true; setCurrent(saved);
+            stick.current = true;
             if (routeId !== conv.id) navigate(`/chat/${conv.id}`);
             return true;
         } catch (e) {
-            if (!active()) return false;
+            if (!active()) { if (mounted.current) { loadList(); loadUsage(); } return false; }
             if (e.name === 'AbortError') {
                 if (ctl.stopRequested && ctl.conversationId) {
                     try { const saved = await get(`/conversations/${ctl.conversationId}`); if (!active()) return false; setCurrent(saved); loadList(); loadUsage(); if (routeId !== saved.id) navigate(`/chat/${saved.id}`); return true; }
@@ -201,7 +210,10 @@ export default function Chat() {
                 loadUsage();
             }
             return false;
-        } finally { setBusy(false); setPendingText(null); setLiveText(''); setStopping(false); setCanStop(false); abort.current = null; }
+        } finally {
+            bg.current.delete(ctl);
+            if (abort.current === ctl) { abort.current = null; setBusy(false); setPendingText(null); setLiveText(''); setStopping(false); setCanStop(false); }
+        }
     };
 
     const uploading = files.some((f) => f.status === 'uploading');

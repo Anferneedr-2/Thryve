@@ -61,6 +61,23 @@ class ChatStreamingTest extends TestCase
         $this->device($cookie)->postJson('/api/chat', ['message' => 'Follow up', 'conversation_id' => $id])->assertOk();
     }
 
+    public function test_one_person_can_run_chats_in_different_conversations_but_not_twice_in_the_same_one(): void
+    {
+        $cookie = $this->cookieFor(Role::EMPLOYEE);
+        $this->mock(HermesClient::class, function ($mock) {
+            $mock->shouldReceive('chat')->andReturn(['content' => 'Answer', 'input' => 10, 'output' => 3, 'estimate' => false, 'finish' => 'stop']);
+        });
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'First chat'])->assertOk();
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Second chat'])->assertOk();
+        [$a, $b] = Message::query()->distinct()->orderBy('conversation_id')->pluck('conversation_id')->all();
+        $userId = DB::table('conversations')->where('id', $a)->value('user_id');
+        DB::table('chat_requests')->insert(['id' => (string) Str::uuid(), 'user_id' => $userId, 'conversation_id' => $a, 'status' => 'running', 'cancel_requested' => false, 'expires_at' => now()->addMinutes(5), 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Again in A', 'conversation_id' => $a])->assertStatus(409);
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Meanwhile in B', 'conversation_id' => $b])->assertOk();
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'A brand new chat'])->assertOk();
+    }
+
     private function sse(): string
     {
         return 'data: '.json_encode(['choices' => [['delta' => ['content' => 'Hello ']]]])."\n\n"
@@ -130,7 +147,7 @@ class ChatStreamingTest extends TestCase
                 $cancelled = $stop();
                 $seenWhileRunning = Carbon::parse(DB::table('chat_requests')->value('expires_at'));
                 $this->travel(20)->seconds();
-                $secondStatus = $this->device($cookie)->postJson('/api/chat', ['message' => 'A second request'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->status();
+                $secondStatus = $this->device($cookie)->postJson('/api/chat', ['message' => 'A second request', 'conversation_id' => DB::table('chat_requests')->value('conversation_id')], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->status();
                 $receive($this->sse());
 
                 return false;
@@ -173,12 +190,14 @@ class ChatStreamingTest extends TestCase
     {
         [$user] = [$this->makeUser(Role::EMPLOYEE)];
         [, $cookie] = $this->signIn($user);
-        DB::table('chat_requests')->insert(['id' => (string) Str::uuid(), 'user_id' => $user->id, 'status' => 'running', 'cancel_requested' => false, 'expires_at' => now()->addSeconds(60), 'created_at' => now(), 'updated_at' => now()]);
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'First'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertOk()->streamedContent();
+        $conversationId = Message::first()->conversation_id;
+        DB::table('chat_requests')->insert(['id' => (string) Str::uuid(), 'user_id' => $user->id, 'conversation_id' => $conversationId, 'status' => 'running', 'cancel_requested' => false, 'expires_at' => now()->addSeconds(60), 'created_at' => now(), 'updated_at' => now()]);
 
-        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertStatus(409); // still within its lease
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi', 'conversation_id' => $conversationId], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertStatus(409); // still within its lease
 
         $this->travel(61)->seconds(); // the process behind it died and never renewed
-        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi again'], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertOk();
+        $this->device($cookie)->postJson('/api/chat', ['message' => 'Hi again', 'conversation_id' => $conversationId], ['Accept' => 'text/event-stream', 'X-Chat-Stream-Id' => (string) Str::uuid()])->assertOk();
     }
 
     public function test_provider_stream_decodes_split_events_and_real_usage(): void
